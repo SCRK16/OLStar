@@ -6,7 +6,7 @@ import net.automatalib.util.automaton.Automata;
 import net.automatalib.util.automaton.builder.AutomatonBuilders;
 import net.automatalib.automaton.transducer.CompactMealy;
 import net.automatalib.automaton.transducer.MealyMachine;
-//import net.automatalib.serialization.dot.DOTParsers;
+import net.automatalib.serialization.dot.DOTParsers;
 import net.automatalib.visualization.Visualization;
 import net.automatalib.word.Word;
 
@@ -14,9 +14,9 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Paths;
+//import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.List;
+//import java.util.List;
 
 import de.learnlib.acex.AcexAnalyzers;
 import de.learnlib.algorithm.LearningAlgorithm.MealyLearner;
@@ -129,7 +129,7 @@ public class Main {
         } else if (algorithm.equals("TTT")) {
             learner = new TTTLearnerMealy<>(inputAlphabet, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
         } else if (algorithm.equals("OLstar") || algorithm.equals("OL*")) {
-            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle);
+            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true);
         } else if (algorithm.equals("Lstar") || algorithm.equals("L*")) {
             learner = MealyUtil.wrapSymbolLearner(
                     new ClassicLStarMealy<I, O>(inputAlphabet, MealyUtil.wrapWordOracle(mCacheOracle),
@@ -182,24 +182,25 @@ public class Main {
             CompactMealy<Character, Object> target = constructSUL();
             learn(target, args[1], false, null, null);
         } else {
+            if (args[0].equals("_")) {
+                args[0] = "m41";
+            }
+            CompactMealy<String, String> target = DOTParsers
+                    .mealy()
+                    .readModel(new File(
+                            "D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkASMLRERS2019\\" +
+                                    args[0]
+                                    + ".dot")).model;
+
             /*
              * if (args[0].equals("_")) {
-             * args[0] = "m41";
+             * args[0] = "bbsse_minimized";
              * }
-             * CompactMealy<String, String> target = DOTParsers
-             * .mealy()
-             * .readModel(new File(
-             * "D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkASMLRERS2019\\" +
-             * args[0]
-             * + ".dot")).model;
+             * CircuitParser parser = new CircuitParser(Paths
+             * .get("D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkCircuits\\" + args[0] + "
+             * .dot"));
+             * CompactMealy<String, List<String>> target = parser.createMachine();
              */
-
-            if (args[0].equals("_")) {
-                args[0] = "bbara_minimized";
-            }
-            CircuitParser parser = new CircuitParser(Paths
-                    .get("D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkCircuits\\" + args[0] + ".dot"));
-            CompactMealy<String, List<String>> target = parser.createMachine();
             learn(target, args[1], false, null, null);
         }
     }

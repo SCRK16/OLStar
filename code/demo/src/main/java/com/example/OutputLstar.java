@@ -27,10 +27,12 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     private OutputObservationTable<I, O> table;
     private final MembershipOracle<I, Word<O>> mqOracle;
     private final Alphabet<I> inputAlphabet;
+    private final boolean checkConsistency;
 
-    public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle) {
+    public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle, boolean checkConsistency) {
         this.inputAlphabet = inputAlphabet;
         this.mqOracle = membershipOracle;
+        this.checkConsistency = checkConsistency;
         this.table = new OutputObservationTable<>(inputAlphabet, membershipOracle);
     }
 
@@ -113,12 +115,27 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
 
     private boolean closeTable() {
         boolean refined = false;
-        List<List<OutputRow<I, O>>> unclosed = this.table.findUnclosedRows();
+        if(this.table.isRegularClosed()) {
+            return false;
+        }
+        List<List<OutputRow<I, O>>> unclosed =  this.table.findUnclosedRows();
         while (!unclosed.isEmpty()) {
             OutputRow<I, O> newShortRow = this.selectClosingRow(unclosed);
             this.table.makeShort(newShortRow);
             refined = true;
+            if(this.table.isRegularClosed()) {
+                return true;
+            }
             unclosed = this.table.findUnclosedRows();
+        }
+        if(checkConsistency) {
+            Word<I> inconsistency = this.table.findInconsistentRows();
+            if(inconsistency != null) {
+                System.out.println(String.valueOf(this.table.getShortPrefixRows().size()) + " / Inconsistency: " + inconsistency.toString());
+                this.table.addSuffix(inconsistency);
+                refined = true;
+                this.closeTable();
+            }
         }
         return refined;
     }

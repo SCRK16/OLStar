@@ -19,7 +19,6 @@ public class OutputRow<I, O> {
     private ArrayList<OutputRow<I, O>> successors;
     /**
      * For every output symbol, the short row this row is equal to.
-     * This is null for short prefix rows, indicating that the short row is equal to itself.
      */
     private ArrayList<OutputRow<I, O>> shortRows;
     /** For every input, the output from this row */

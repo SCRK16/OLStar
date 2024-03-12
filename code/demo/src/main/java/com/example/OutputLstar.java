@@ -28,6 +28,9 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     private final MembershipOracle<I, Word<O>> mqOracle;
     private final Alphabet<I> inputAlphabet;
     private final boolean checkConsistency;
+    public int inconsistentCount = 0;
+    public int zeroOutputsCount = 0;
+    public int twoOutputsCount = 0;
 
     public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle, boolean checkConsistency) {
         this.inputAlphabet = inputAlphabet;
@@ -131,6 +134,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         if(checkConsistency) {
             Word<I> inconsistency = this.table.findInconsistentRows();
             if(inconsistency != null) {
+                this.inconsistentCount += 1;
                 System.out.println(String.valueOf(this.table.getShortPrefixRows().size()) + " / Inconsistency: " + inconsistency.toString());
                 this.table.addSuffix(inconsistency);
                 refined = true;
@@ -160,9 +164,11 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
                 wbin.add(in);
                 Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>> transition = hypothesis.getTransition(curr, in);
                 if (transition.getFirst().getFirst() && transition.getSecond().getFirst()) {// We have found a defect
+                    this.twoOutputsCount += 1;
                     Word<I> w = wbin.toWord();
                     DefaultQuery<I, Word<O>> ce = new DefaultQuery<>(w);
                     ce.answer(this.mqOracle.answerQuery(w));
+                    this.table.findAllInconsistentRows(); //TODO: Remove this line
                     return ce;
                 }
                 Pair<OutputRow<I, O>, OutputRow<I, O>> succ = hypothesis.getSuccessor(transition);
@@ -220,9 +226,11 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
                 List<Boolean> outputs = transition.stream().map(Pair::getFirst).toList();
                 long trueCount = Collections.frequency(outputs, true);
                 if (trueCount == 0) {// We have found a defect
+                    this.zeroOutputsCount += 1;
                     Word<I> w = wbin.toWord();
                     DefaultQuery<I, Word<O>> ce = new DefaultQuery<>(w);
                     ce.answer(this.mqOracle.answerQuery(w));
+                    this.table.findAllInconsistentRows(); //TODO: Remove this line
                     return ce;
                 }
                 List<OutputRow<I, O>> succ = hypothesis.getSuccessor(transition);

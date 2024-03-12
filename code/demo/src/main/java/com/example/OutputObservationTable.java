@@ -463,4 +463,37 @@ public class OutputObservationTable<I, O> {
         }
         return null;
     }
+
+    public List<Word<I>> findAllInconsistentRows() {
+        ArrayList<Word<I>> result = new ArrayList<>();
+        for (int i = 0; i < this.outputAlphabet.size(); i++) {
+            Map<List<Word<Boolean>>, List<Integer>> currentOutputContentIds = this.outputContentIds.get(i);
+            for (List<Integer> currentList : currentOutputContentIds.values()) {
+                if (currentList.size() <= 1) {
+                    continue;
+                }
+                for (int a = 0; a < this.inputAlphabet.size(); a++) {
+                    List<List<Word<Boolean>>> successors = new ArrayList<>();
+                    for (Integer current : currentList) { // Build successor rows
+                        OutputRow<I, O> currentRow = this.allRows.get(current);
+                        OutputRow<I, O> sucRow = currentRow.getSuccessor(a);
+                        List<Word<O>> sucOutputs = this.table.get(sucRow.getRowId());
+                        successors.add(this.toOutputWords(sucOutputs, this.outputAlphabet.getSymbol(i)));
+                    }
+                    List<Word<Boolean>> first = successors.get(0);
+                    for (int j = 1; j < successors.size(); j++) { // Check they are all equal
+                        List<Word<Boolean>> other = successors.get(j);
+                        for (int k = 0; k < first.size(); k++) {
+                            if (!first.get(k).equals(other.get(k))) { // Inconsistency found
+                                I infix = this.inputAlphabet.getSymbol(a);
+                                Word<I> suffix = this.suffixes.get(k);
+                                result.add(Word.fromLetter(infix).concat(suffix));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return result;
+    }
 }

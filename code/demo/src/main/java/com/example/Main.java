@@ -14,9 +14,9 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-//import java.nio.file.Paths;
+import java.nio.file.Paths;
 import java.util.ArrayList;
-//import java.util.List;
+import java.util.List;
 
 import de.learnlib.acex.AcexAnalyzers;
 import de.learnlib.algorithm.LearningAlgorithm.MealyLearner;
@@ -61,6 +61,24 @@ public class Main {
 
     public static Alphabet<Object> SULOutputAlphabet() {
         return Alphabets.fromArray('0', '1', '2');
+    }
+
+    public static CompactMealy<Character, Object> constructComponentInconsistentSUL() {
+        Alphabet<Character> alphabet = Alphabets.fromArray('a', 'b');
+        return AutomatonBuilders.newMealy(alphabet).withInitial("qe")
+            .from("qe")
+            .on('a').withOutput('0').to("qa")
+            .on('b').withOutput('1').to("qb")
+            .from("qa")
+            .on('a').withOutput('1').to("qaa")
+            .on('b').withOutput('2').to("qaa")
+            .from("qb")
+            .on('a').withOutput('0').to("qaa")
+            .on('b').withOutput('2').to("qaa")
+            .from("qaa")
+            .on('a').withOutput('2').to("qaa")
+            .on('b').withOutput('0').to("qaa")
+            .create();
     }
 
     public static <I> void learnComponents(ArrayList<MealyLearner<I, Boolean>> components, Alphabet<I> inputAlphabet) {
@@ -143,6 +161,12 @@ public class Main {
         System.out.println("Learning: " + mOracleForLearning.getStatisticalData().getSummary());
         System.out.println("Testing: " + mOracleForTesting.getStatisticalData().getSummary());
         System.out.println("Rounds: " + stage);
+        if(learner instanceof OutputLstar) {
+            OutputLstar<I, O> outputLearner = (OutputLstar<I, O>) learner;
+            System.out.println("Inconsistent count: " + String.valueOf(outputLearner.inconsistentCount));
+            System.out.println("Zero outputs count: " + String.valueOf(outputLearner.zeroOutputsCount));
+            System.out.println("Two outputs count: " + String.valueOf(outputLearner.twoOutputsCount));
+        }
 
         if (visualize) {
             Visualization.visualize(learner.getHypothesisModel(), inputAlphabet, true);
@@ -179,28 +203,25 @@ public class Main {
             args = new String[] { "_", "OL*" };
         }
         if (args[0].equals("toy")) {
-            CompactMealy<Character, Object> target = constructSUL();
+            CompactMealy<Character, Object> target = constructComponentInconsistentSUL();
             learn(target, args[1], false, null, null);
         } else {
-            if (args[0].equals("_")) {
-                args[0] = "m41";
+            /*if (args[0].equals("_")) {
+                args[0] = "m54";
             }
             CompactMealy<String, String> target = DOTParsers
                     .mealy()
                     .readModel(new File(
                             "D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkASMLRERS2019\\" +
                                     args[0]
-                                    + ".dot")).model;
+                                    + ".dot")).model;*/
 
-            /*
-             * if (args[0].equals("_")) {
-             * args[0] = "bbsse_minimized";
-             * }
-             * CircuitParser parser = new CircuitParser(Paths
-             * .get("D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkCircuits\\" + args[0] + "
-             * .dot"));
-             * CompactMealy<String, List<String>> target = parser.createMachine();
-             */
+            if (args[0].equals("_")) {
+                args[0] = "bbsse_minimized";
+            }
+            CircuitParser parser = new CircuitParser(Paths
+                    .get("D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkCircuits\\" + args[0] + ".dot"));
+            CompactMealy<String, List<String>> target = parser.createMachine();
             learn(target, args[1], false, null, null);
         }
     }

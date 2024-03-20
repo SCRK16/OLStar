@@ -168,7 +168,6 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
                     Word<I> w = wbin.toWord();
                     DefaultQuery<I, Word<O>> ce = new DefaultQuery<>(w);
                     ce.answer(this.mqOracle.answerQuery(w));
-                    this.table.findAllInconsistentRows(); //TODO: Remove this line
                     return ce;
                 }
                 Pair<OutputRow<I, O>, OutputRow<I, O>> succ = hypothesis.getSuccessor(transition);
@@ -230,7 +229,6 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
                     Word<I> w = wbin.toWord();
                     DefaultQuery<I, Word<O>> ce = new DefaultQuery<>(w);
                     ce.answer(this.mqOracle.answerQuery(w));
-                    this.table.findAllInconsistentRows(); //TODO: Remove this line
                     return ce;
                 }
                 List<OutputRow<I, O>> succ = hypothesis.getSuccessor(transition);

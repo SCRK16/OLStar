@@ -1,5 +1,6 @@
 # VSCode Setup
 .vscode/
+code/python/.venv/
 
 # Compiled class file
 *.class

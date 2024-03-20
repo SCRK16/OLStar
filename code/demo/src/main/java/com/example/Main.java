@@ -14,9 +14,8 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
+//import java.nio.file.Paths;
+//import java.util.List;
 
 import de.learnlib.acex.AcexAnalyzers;
 import de.learnlib.algorithm.LearningAlgorithm.MealyLearner;
@@ -66,38 +65,19 @@ public class Main {
     public static CompactMealy<Character, Object> constructComponentInconsistentSUL() {
         Alphabet<Character> alphabet = Alphabets.fromArray('a', 'b');
         return AutomatonBuilders.newMealy(alphabet).withInitial("qe")
-            .from("qe")
-            .on('a').withOutput('0').to("qa")
-            .on('b').withOutput('1').to("qb")
-            .from("qa")
-            .on('a').withOutput('1').to("qaa")
-            .on('b').withOutput('2').to("qaa")
-            .from("qb")
-            .on('a').withOutput('0').to("qaa")
-            .on('b').withOutput('2').to("qaa")
-            .from("qaa")
-            .on('a').withOutput('2').to("qaa")
-            .on('b').withOutput('0').to("qaa")
-            .create();
-    }
-
-    public static <I> void learnComponents(ArrayList<MealyLearner<I, Boolean>> components, Alphabet<I> inputAlphabet) {
-        int componentCount = 0;
-        for (MealyLearner<I, Boolean> component : components) {
-            System.out.println("\nLearning component: " + String.valueOf(++componentCount));
-            MealyMachine<?, I, ?, Boolean> target = component.getHypothesisModel();
-            MealySimulatorOracle<I, Boolean> componentOracle = new MealySimulatorOracle<>(target);
-            MealyCounterOracle<I, Boolean> componentCounterOracle = new MealyCounterOracle<>(componentOracle);
-            MealyCounterOracle<I, Boolean> testingCounterOracle = new MealyCounterOracle<>(componentOracle);
-            MealyWpMethodEQOracle<I, Boolean> testingEqOracle = new MealyWpMethodEQOracle<>(testingCounterOracle, 3);
-            TTTLearnerMealy<I, Boolean> componentTTT = new TTTLearnerMealy<>(inputAlphabet, componentCounterOracle,
-                    AcexAnalyzers.LINEAR_FWD);
-            int stage = learnLoop(componentTTT, inputAlphabet, testingEqOracle, false, target);
-            System.out.println("Learning: " + componentCounterOracle.getStatisticalData().getSummary());
-            // System.out.println("Testing: " +
-            // testingCounterOracle.getStatisticalData().getSummary());
-            System.out.println("Rounds: " + stage);
-        }
+                .from("qe")
+                .on('a').withOutput('0').to("qa")
+                .on('b').withOutput('1').to("qb")
+                .from("qa")
+                .on('a').withOutput('1').to("qaa")
+                .on('b').withOutput('2').to("qaa")
+                .from("qb")
+                .on('a').withOutput('0').to("qaa")
+                .on('b').withOutput('2').to("qaa")
+                .from("qaa")
+                .on('a').withOutput('2').to("qaa")
+                .on('b').withOutput('0').to("qaa")
+                .create();
     }
 
     public static <I, O> int learnLoop(MealyLearner<I, O> learner, Alphabet<I> inputAlphabet,
@@ -161,7 +141,7 @@ public class Main {
         System.out.println("Learning: " + mOracleForLearning.getStatisticalData().getSummary());
         System.out.println("Testing: " + mOracleForTesting.getStatisticalData().getSummary());
         System.out.println("Rounds: " + stage);
-        if(learner instanceof OutputLstar) {
+        if (learner instanceof OutputLstar) {
             OutputLstar<I, O> outputLearner = (OutputLstar<I, O>) learner;
             System.out.println("Inconsistent count: " + String.valueOf(outputLearner.inconsistentCount));
             System.out.println("Zero outputs count: " + String.valueOf(outputLearner.zeroOutputsCount));
@@ -180,15 +160,24 @@ public class Main {
             writer.append(String.valueOf(stage));
             writer.append("\nNumber of states found: ");
             writer.append(String.valueOf(learner.getHypothesisModel().size()));
-            writer.append("\nComponent sizes: ");
             if (learner instanceof DynamicMealyDecomposer) {
+                writer.append("\nComponent sizes: ");
                 for (MealyLearner<I, Boolean> component : ((DynamicMealyDecomposer<I, O>) learner).learners) {
                     writer.append(String.valueOf(component.getHypothesisModel().size()));
                     writer.append(" - ");
                 }
             }
-            writer.append('\n');
+            if (learner instanceof OutputLstar) {
+                OutputLstar<I, O> outputLearner = (OutputLstar<I, O>) learner;
+                writer.append("\nNumber of short rows: " + String.valueOf(outputLearner.getObservationTable().getShortPrefixRows().size()));
+                writer.append("\nInconsistent count: " + String.valueOf(outputLearner.inconsistentCount));
+                writer.append("\nZero outputs count: " + String.valueOf(outputLearner.zeroOutputsCount));
+                writer.append("\nTwo outputs count: " + String.valueOf(outputLearner.twoOutputsCount));
+            }
+            writer.append("\nLearning: ");
             writer.append(mOracleForLearning.getStatisticalData().getSummary());
+            writer.append("\nTesting: ");
+            writer.append(mOracleForTesting.getStatisticalData().getSummary());
             writer.append("\n\n");
             writer.close();
         }
@@ -205,23 +194,40 @@ public class Main {
         if (args[0].equals("toy")) {
             CompactMealy<Character, Object> target = constructComponentInconsistentSUL();
             learn(target, args[1], false, null, null);
+        } else if (args[0].equals("all")) {
+            File file = new File("D:\\Data\\results_labbaf_olstar.txt");
+            for (int i = 144; i < 199; i++) {
+                if (i == 95) continue; // Benchmark 95 doesn't exist
+                CompactMealy<String, String> target = DOTParsers
+                    .mealy()
+                    .readModel(new File(
+                        "D:\\Models\\Labbaf\\" + String.valueOf(i) + ".dot"
+                    )).model;
+                learn(target, args[1], false, file, String.valueOf(i));
+            }
         } else {
-            /*if (args[0].equals("_")) {
-                args[0] = "m54";
+            if (args[0].equals("_")) {
+                // args[0] = "m54";
+                args[0] = "106";
+                // args[0] = "kopie";
             }
             CompactMealy<String, String> target = DOTParsers
                     .mealy()
                     .readModel(new File(
-                            "D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkASMLRERS2019\\" +
+                            // "D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkASMLRERS2019\\" +
+                            "D:\\Models\\Labbaf\\" +
                                     args[0]
-                                    + ".dot")).model;*/
+                                    + ".dot")).model;
 
-            if (args[0].equals("_")) {
-                args[0] = "bbsse_minimized";
-            }
-            CircuitParser parser = new CircuitParser(Paths
-                    .get("D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkCircuits\\" + args[0] + ".dot"));
-            CompactMealy<String, List<String>> target = parser.createMachine();
+            /*
+             * if (args[0].equals("_")) {
+             * args[0] = "bbara_minimized";
+             * }
+             * CircuitParser parser = new CircuitParser(Paths
+             * .get("D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkCircuits\\" + args[0] + "
+             * .dot"));
+             * CompactMealy<String, List<String>> target = parser.createMachine();
+             */
             learn(target, args[1], false, null, null);
         }
     }

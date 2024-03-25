@@ -196,9 +196,9 @@ public class Main {
             learn(target, args[1], false, null, null);
         } else if (args[0].equals("all")) {
             File file = new File("D:\\Data\\results_labbaf_olstar.txt");
-            for (int i = 144; i < 199; i++) {
-                if (i == 95) continue; // Benchmark 95 doesn't exist
-                CompactMealy<String, String> target = DOTParsers
+            for (int i = 195; i < 197; i++) { // Note: Couldn't learn 188 because of OutOfMemoryError, 2725 short rows found
+                if (i == 95 || i == 190) continue; // Benchmark 95 doesn't exist, already did 190
+                CompactMealy<String, String> target = DOTParsers // Left : 193, Right: 195, 197 & 198 done
                     .mealy()
                     .readModel(new File(
                         "D:\\Models\\Labbaf\\" + String.valueOf(i) + ".dot"

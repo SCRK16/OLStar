@@ -1,9 +1,9 @@
-import matplotlib.pyplot as plt
 import csv
+import matplotlib.pyplot as plt
 
 def read_olstar(filename):
     with open(filename) as f:
-        data = [s.split("\n") for s in f.read().split("\n\n")[:-1]]
+        data = [s.split("\n") for s in f.read().split("\n\n")]
     for model in data:
         for i in range(11):
             model[i] = int(model[i].split(": ")[-1])
@@ -18,7 +18,7 @@ def read_lstar(filename):
     return data
 
 def write_to_csv(data, filename):
-    with open(filename) as f:
+    with open(filename, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerows(data)
 
@@ -36,10 +36,10 @@ def total_symbols_lstar(data):
 
 def main():
     data_olstar = read_olstar("D:\\Data\\results_labbaf_olstar.txt")
-    data_lstar = read_lstar("D:\\Data\\results_labbaf_lstar.txt")[:len(data_olstar)]
+    data_lstar = read_lstar("D:\\Data\\results_labbaf_lstar.txt")
 
-    plot_data_olstar = total_symbols_olstar(data_olstar)
-    plot_data_lstar = total_symbols_lstar(data_lstar)
+    plot_data_olstar = total_queries_olstar(data_olstar)
+    plot_data_lstar = total_queries_lstar(data_lstar)
 
     fig, ax = plt.subplots(figsize=(10, 10))
     plt.plot(plot_data_lstar, plot_data_olstar, 'ro', markersize=4)

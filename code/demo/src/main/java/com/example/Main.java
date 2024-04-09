@@ -14,6 +14,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayList;
 //import java.nio.file.Paths;
 //import java.util.List;
 
@@ -34,32 +35,26 @@ import de.learnlib.util.mealy.MealyUtil;
 
 public class Main {
 
-    public static CompactMealy<Character, Object> constructSUL() {
+    public static CompactMealy<Character, Object> constructSUL(int n) {
         Alphabet<Character> alphabet = Alphabets.fromArray('a', 'b');
-        return AutomatonBuilders.newMealy(alphabet).withInitial("q0")
-                .from("q0")
-                .on('a').withOutput('1').to("q1")
-                .on('b').withOutput('0').to("r0")
-                .from("q1")
-                .on('a').withOutput('2').to("q2")
-                .on('b').withOutput('1').to("r1")
-                .from("q2")
-                .on('a').withOutput('0').to("q0")
-                .on('b').withOutput('2').to("r2")
-                .from("r0")
-                .on('a').withOutput('2').to("r2")
-                .on('b').withOutput('0').to("q0")
-                .from("r1")
-                .on('a').withOutput('0').to("r0")
-                .on('b').withOutput('1').to("q1")
-                .from("r2")
-                .on('a').withOutput('1').to("r1")
-                .on('b').withOutput('2').to("q2")
-                .create();
+        var result = AutomatonBuilders.newMealy(alphabet).withInitial(0);
+        for(int i = 0; i < n; i++) {
+            result.from(i)
+                  .on('a').withOutput((i+1) % n).to((i+1) % n)
+                  .on('b').withOutput(i).to(i+n);
+            result.from(i+n)
+                  .on('a').withOutput((i+n-1) % n).to((i+n-1) % n + n)
+                  .on('b').withOutput(i).to(i);
+        }
+        return result.create();
     }
 
-    public static Alphabet<Object> SULOutputAlphabet() {
-        return Alphabets.fromArray('0', '1', '2');
+    public static Alphabet<Object> SULOutputAlphabet(int n) {
+        ArrayList<Integer> outputs = new ArrayList<>();
+        for(int i = 0; i < n; i++) {
+            outputs.add(i);
+        }
+        return Alphabets.fromList(outputs);
     }
 
     public static CompactMealy<Character, Object> constructComponentInconsistentSUL() {
@@ -192,7 +187,7 @@ public class Main {
             args = new String[] { "_", "OL*" };
         }
         if (args[0].equals("toy")) {
-            CompactMealy<Character, Object> target = constructComponentInconsistentSUL();
+            CompactMealy<Character, Object> target = constructSUL(3);
             learn(target, args[1], false, null, null);
         } else if (args[0].equals("all")) {
             File file = new File("D:\\Data\\results_labbaf_olstar_all_inconsistencies.txt");

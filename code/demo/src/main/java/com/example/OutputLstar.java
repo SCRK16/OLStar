@@ -28,14 +28,16 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     private final MembershipOracle<I, Word<O>> mqOracle;
     private final Alphabet<I> inputAlphabet;
     private final boolean checkConsistency;
+    private final boolean useFirstInconsistency;
     public int inconsistentCount = 0;
     public int zeroOutputsCount = 0;
     public int twoOutputsCount = 0;
 
-    public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle, boolean checkConsistency) {
+    public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle, boolean checkConsistency, boolean useFirstInconsistency) {
         this.inputAlphabet = inputAlphabet;
         this.mqOracle = membershipOracle;
         this.checkConsistency = checkConsistency;
+        this.useFirstInconsistency = useFirstInconsistency;
         this.table = new OutputObservationTable<>(inputAlphabet, membershipOracle);
     }
 
@@ -103,6 +105,21 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         return bestRow;
     }
 
+    private <T> T mostCommon(List<T> list) {
+        T best = null;
+        Integer bestCount = 0;
+        HashMap<T, Integer> counts = new HashMap<>();
+        for (T item : list) {
+            Integer count = counts.getOrDefault(item, 0) + 1;
+            counts.put(item, count);
+            if (count > bestCount) {
+                best = item;
+                bestCount = count;
+            }
+        }
+        return best;
+    }
+
     @Override
     public void startLearning() {
         List<Word<I>> prefixes = Collections.singletonList(Word.epsilon());
@@ -131,13 +148,24 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             }
             unclosed = this.table.findUnclosedRows();
         }
-        if(checkConsistency) {
+        if(checkConsistency && useFirstInconsistency) {
             Word<I> inconsistency = this.table.findInconsistentRows();
             if(inconsistency != null) {
                 this.inconsistentCount += 1;
                 System.out.println(String.valueOf(this.table.getShortPrefixRows().size()) + " / Inconsistency: " + inconsistency.toString());
                 this.table.addSuffix(inconsistency);
                 refined = true;
+                this.closeTable();
+            }
+        } else if (checkConsistency) {
+            List<Word<I>> inconsistencies = this.table.findAllInconsistentRows();
+            if (!inconsistencies.isEmpty()) {
+                Word<I> toFix = mostCommon(inconsistencies);
+                this.table.addSuffix(toFix);
+                refined = true;
+                this.inconsistentCount += 1;
+                System.out.println(String.valueOf(this.table.getShortPrefixRows().size()) + " / Inconsistency: " + toFix.toString());
+                inconsistencies.clear();
                 this.closeTable();
             }
         }

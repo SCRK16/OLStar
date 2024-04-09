@@ -127,7 +127,7 @@ public class Main {
         } else if (algorithm.equals("TTT")) {
             learner = new TTTLearnerMealy<>(inputAlphabet, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
         } else if (algorithm.equals("OLstar") || algorithm.equals("OL*")) {
-            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true);
+            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true, false);
         } else if (algorithm.equals("Lstar") || algorithm.equals("L*")) {
             learner = MealyUtil.wrapSymbolLearner(
                     new ClassicLStarMealy<I, O>(inputAlphabet, MealyUtil.wrapWordOracle(mCacheOracle),
@@ -195,9 +195,10 @@ public class Main {
             CompactMealy<Character, Object> target = constructComponentInconsistentSUL();
             learn(target, args[1], false, null, null);
         } else if (args[0].equals("all")) {
-            File file = new File("D:\\Data\\results_labbaf_olstar.txt");
-            for (int i = 1; i < 199; i++) { // Note: Couldn't learn 188 because of OutOfMemoryError, 2725 short rows found
-                if (i == 95 || i == 190) continue; // Benchmark 95 doesn't exist
+            File file = new File("D:\\Data\\results_labbaf_olstar_all_inconsistencies.txt");
+            for (int i = 195; i < 199; i++) { // Note: Couldn't learn 188 because of OutOfMemoryError, 2725 short rows found
+                System.out.println("Current:" + String.valueOf(i));
+                if (i == 95) continue; // Benchmark 95 doesn't exist
                 CompactMealy<String, String> target = DOTParsers
                     .mealy()
                     .readModel(new File(

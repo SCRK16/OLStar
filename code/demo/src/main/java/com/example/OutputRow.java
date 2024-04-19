@@ -8,6 +8,11 @@ import com.google.common.collect.Lists;
 
 import net.automatalib.word.Word;
 
+/**
+ * The rows in the observation table used by OL*.
+ * They record their own successor rows and outputs,
+ * so they can be used effectively as the states in a Mealy machine.
+ */
 public class OutputRow<I, O> {
 
     private final Word<I> label;
@@ -61,10 +66,10 @@ public class OutputRow<I, O> {
     }
 
     public boolean setShortRow(int outputIndex, OutputRow<I, O> row) {
-        while(this.shortRows.size() < outputIndex) {
+        while (this.shortRows.size() < outputIndex) {
             this.shortRows.add(null);
         }
-        if(this.shortRows.size() == outputIndex) {
+        if (this.shortRows.size() == outputIndex) {
             this.shortRows.add(row);
         } else {
             this.shortRows.set(outputIndex, row);

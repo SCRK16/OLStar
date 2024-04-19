@@ -33,7 +33,21 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     public int zeroOutputsCount = 0;
     public int twoOutputsCount = 0;
 
-    public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle, boolean checkConsistency, boolean useFirstInconsistency) {
+    /**
+     * Constructor for OL*
+     *
+     * @param inputAlphabet         The input alphabet of the target
+     * @param membershipOracle      The oracle to be used for membership queries
+     * @param checkConsistency      True if OL* should check for output-consistency
+     *                              (if false, more component-inconsistencies may
+     *                              happen)
+     * @param useFirstInconsistency True if OL* should fix the first inconsistency
+     *                              found, false if OL* should find all
+     *                              inconsistencies and pick the word that would fix
+     *                              the most inconsistencies at the same time
+     */
+    public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle,
+            boolean checkConsistency, boolean useFirstInconsistency) {
         this.inputAlphabet = inputAlphabet;
         this.mqOracle = membershipOracle;
         this.checkConsistency = checkConsistency;
@@ -71,6 +85,12 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         return refined;
     }
 
+    /**
+     * Checks if the provided query is a counterexample for the current hypothesis
+     *
+     * @param ce The query to be checked
+     * @return True if the query is a counterexample
+     */
     private boolean isCounterexample(DefaultQuery<I, Word<O>> ce) {
         MealyMachine<?, I, ?, O> hypothesis = this.getHypothesisModel();
         Word<O> output = hypothesis.computeSuffixOutput(ce.getPrefix(), ce.getSuffix());
@@ -133,26 +153,33 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         return this.table;
     }
 
+    /**
+     * Makes sure the observation table is output-closed (and output-consistent)
+     *
+     * @return True if and only if the table was refined (there were new rows or
+     *         columns added to the table)
+     */
     private boolean closeTable() {
         boolean refined = false;
-        if(this.table.isRegularClosed()) {
+        if (this.table.isRegularClosed()) {
             return false;
         }
-        List<List<OutputRow<I, O>>> unclosed =  this.table.findUnclosedRows();
+        List<List<OutputRow<I, O>>> unclosed = this.table.findUnclosedRows();
         while (!unclosed.isEmpty()) {
             OutputRow<I, O> newShortRow = this.selectClosingRow(unclosed);
             this.table.makeShort(newShortRow);
             refined = true;
-            if(this.table.isRegularClosed()) {
+            if (this.table.isRegularClosed()) {
                 return true;
             }
             unclosed = this.table.findUnclosedRows();
         }
-        if(checkConsistency && useFirstInconsistency) {
+        if (checkConsistency && useFirstInconsistency) {
             Word<I> inconsistency = this.table.findInconsistentRows();
-            if(inconsistency != null) {
+            if (inconsistency != null) {
                 this.inconsistentCount += 1;
-                System.out.println(String.valueOf(this.table.getShortPrefixRows().size()) + " / Inconsistency: " + inconsistency.toString());
+                System.out.println(String.valueOf(this.table.getShortPrefixRows().size()) + " / Inconsistency: "
+                        + inconsistency.toString());
                 this.table.addSuffix(inconsistency);
                 refined = true;
                 this.closeTable();
@@ -164,7 +191,8 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
                 this.table.addSuffix(toFix);
                 refined = true;
                 this.inconsistentCount += 1;
-                System.out.println(String.valueOf(this.table.getShortPrefixRows().size()) + " / Inconsistency: " + toFix.toString());
+                System.out.println(String.valueOf(this.table.getShortPrefixRows().size()) + " / Inconsistency: "
+                        + toFix.toString());
                 inconsistencies.clear();
                 this.closeTable();
             }
@@ -172,6 +200,14 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         return refined;
     }
 
+    /**
+     * Run a breadth first search to find if two components output 1 at the same
+     * time
+     *
+     * @param hypothesis The hypothesis to be searched
+     * @return Query (already answered) for the word which leads to 2 outputs, or
+     *         null if none exist
+     */
     private DefaultQuery<I, Word<O>> findTwoOutputs(ProjectedOutputMealyMachine hypothesis) {
         Set<Pair<OutputRow<I, O>, OutputRow<I, O>>> reach = new HashSet<>();
         Queue<Pair<OutputRow<I, O>, OutputRow<I, O>>> bfsQueue = new ArrayDeque<>();
@@ -190,7 +226,8 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             for (I in : this.inputAlphabet) {
                 WordBuilder<I> wbin = new WordBuilder<>(wb.toWord());
                 wbin.add(in);
-                Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>> transition = hypothesis.getTransition(curr, in);
+                Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>> transition = hypothesis
+                        .getTransition(curr, in);
                 if (transition.getFirst().getFirst() && transition.getSecond().getFirst()) {// We have found a defect
                     this.twoOutputsCount += 1;
                     Word<I> w = wbin.toWord();
@@ -212,6 +249,12 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         return null;
     }
 
+    /**
+     * Find input word for which multiple components output 1.
+     * This check is done pairwise for each pair of outputs.
+     *
+     * @return Query for which multiple components output 1
+     */
     private DefaultQuery<I, Word<O>> findMultipleOutputs() {
         OutputMealyMachine hypothesis = new OutputMealyMachine(inputAlphabet, this.table.getOutputAlphabet(),
                 this.table.getShortPrefixRows());
@@ -220,7 +263,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             for (int secondIndex = firstIndex + 1; secondIndex < n; secondIndex++) {
                 ProjectedOutputMealyMachine currentMachine = hypothesis.project(firstIndex, secondIndex);
                 DefaultQuery<I, Word<O>> ce = this.findTwoOutputs(currentMachine);
-                if(ce != null) {
+                if (ce != null) {
                     return ce;
                 }
             }
@@ -228,6 +271,11 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         return null;
     }
 
+    /**
+     * Do a breadth first search for an input word for which no component ouput 1.
+     *
+     * @return Query (already answered) for which the defect happens
+     */
     private DefaultQuery<I, Word<O>> findZeroOutputs() {
         OutputMealyMachine hypothesis = new OutputMealyMachine(
                 inputAlphabet, this.table.getOutputAlphabet(), this.table.getShortPrefixRows());
@@ -288,6 +336,12 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         return multipleOutputs != null ? multipleOutputs : this.findZeroOutputs();
     }
 
+    /**
+     * Retry a previous defect to see if it still occurs
+     * 
+     * @param ce The query for which the defect happened
+     * @return True if the defect still occurs
+     */
     private boolean retryDefect(DefaultQuery<I, Word<O>> ce) {
         OutputMealyMachine hypothesis = new OutputMealyMachine(
                 inputAlphabet, this.table.getOutputAlphabet(), this.table.getShortPrefixRows());
@@ -322,6 +376,9 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         System.out.println("No more defects");
     }
 
+    /**
+     * Creates a Mealy machine from a list of rows
+     */
     public class OutputMealyMachine
             implements MealyMachine<List<OutputRow<I, O>>, I, List<Pair<Boolean, OutputRow<I, O>>>, O> {
 
@@ -414,12 +471,26 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             return null;
         }
 
+        /**
+         * Project the Mealy machine on two outputs.
+         * This can be used to check if two outputs are active at the same time.
+         * Checking for multiple outputs in this way is more space efficient,
+         * since the projected machines have a smaller state space.
+         *
+         * @param firstIndex  The index of the first output
+         * @param secondIndex The index of the second output
+         * @return
+         */
         public ProjectedOutputMealyMachine project(int firstIndex, int secondIndex) {
             return new ProjectedOutputMealyMachine(this.inputAlphabet, this.outputAlphabet, this.rows,
                     firstIndex, secondIndex);
         }
     }
 
+    /**
+     * Creates a Mealy machine which only outputs the two specified outputs,
+     * and outputs null when neither output is active.
+     */
     public class ProjectedOutputMealyMachine
             implements
             MealyMachine<Pair<OutputRow<I, O>, OutputRow<I, O>>, I, Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>>, O> {

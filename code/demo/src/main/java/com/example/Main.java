@@ -18,8 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-//import java.nio.file.Paths;
-//import java.util.List;
 import java.util.stream.Stream;
 
 import de.learnlib.acex.AcexAnalyzers;
@@ -39,28 +37,48 @@ import de.learnlib.util.mealy.MealyUtil;
 
 public class Main {
 
+    /**
+     * Create the toy example.
+     *
+     * @param n The number of states of each component
+     * @return The toy example
+     */
     public static CompactMealy<Character, Object> constructSUL(int n) {
         Alphabet<Character> alphabet = Alphabets.fromArray('a', 'b');
         var result = AutomatonBuilders.newMealy(alphabet).withInitial(0);
-        for(int i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
             result.from(i)
-                  .on('a').withOutput((i+1) % n).to((i+1) % n)
-                  .on('b').withOutput(i).to(i+n);
-            result.from(i+n)
-                  .on('a').withOutput((i+n-1) % n).to((i+n-1) % n + n)
-                  .on('b').withOutput(i).to(i);
+                    .on('a').withOutput((i + 1) % n).to((i + 1) % n)
+                    .on('b').withOutput(i).to(i + n);
+            result.from(i + n)
+                    .on('a').withOutput((i + n - 1) % n).to((i + n - 1) % n + n)
+                    .on('b').withOutput(i).to(i);
         }
         return result.create();
     }
 
+    /**
+     * Create the output alphabet of the toy example. Can be used to provide an
+     * algorithm with the output alphabet up front.
+     *
+     * @param n The number of states of each component in the toy example
+     * @return The output alphabet of the toy example
+     */
     public static Alphabet<Object> SULOutputAlphabet(int n) {
         ArrayList<Integer> outputs = new ArrayList<>();
-        for(int i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
             outputs.add(i);
         }
         return Alphabets.fromList(outputs);
     }
 
+    /**
+     * Create a machine which shows that an output-closed and output-consistent
+     * observation table can still result in a component-inconsistent family of
+     * Mealy machines.
+     *
+     * @return The machine
+     */
     public static CompactMealy<Character, Object> constructComponentInconsistentSUL() {
         Alphabet<Character> alphabet = Alphabets.fromArray('a', 'b');
         return AutomatonBuilders.newMealy(alphabet).withInitial("qe")
@@ -79,8 +97,20 @@ public class Main {
                 .create();
     }
 
+    /**
+     * Main loop of active automata learning.
+     *
+     * @param <I>           Input alphabet type
+     * @param <O>           Output alphabet type
+     * @param learner       The learning algorithm
+     * @param inputAlphabet The input alphabet of the target
+     * @param eqOracle      the equivelance oracle
+     * @param target        The target Mealy machine, used to check if an
+     *                      equivalence query is necessary
+     * @return The number of rounds needed to learn the Mealy machine
+     */
     public static <I, O> int learnLoop(MealyLearner<I, O> learner, Alphabet<I> inputAlphabet,
-            MealyEquivalenceOracle<I, O> eqOracle, boolean lastSymbol, MealyMachine<?, I, ?, O> target) {
+            MealyEquivalenceOracle<I, O> eqOracle, MealyMachine<?, I, ?, O> target) {
         if (target == null) {
             throw new IllegalStateException("Target cannot be null");
         }
@@ -104,13 +134,6 @@ public class Main {
             if (ce == null)
                 throw new IllegalStateException(
                         "Equivalence Oracle couldn't find counterexample, even though a separating word exists.");
-            if (!ce.getOutput().equals(target.computeOutput(ce.getInput()))) {
-                System.out.println("In:   " + ce.getInput());
-                System.out.println("ce:   " + ce.getOutput());
-                System.out.println("real: " + target.computeOutput(ce.getInput()));
-                System.out.println("hyp:  " + hypothesis.computeOutput(ce.getInput()));
-                throw new IllegalStateException("Equivalence oracle found invalid counterexample");
-            }
             System.out.println(
                     "Counterexample: " + ce.toString() + ", hypothesis: " + hypothesis.computeOutput(ce.getInput()));
             learner.refineHypothesis(ce);
@@ -118,6 +141,20 @@ public class Main {
         return stage;
     }
 
+    /**
+     * Learns the target using the specified algorithm
+     *
+     * @param <I>       The input alphabet type of the target
+     * @param <O>       The output alphabet type of the target
+     * @param target    The target to be learned
+     * @param algorithm The name of the algorithm to be used
+     * @param visualize Set to true to visualize the results (works poorly when
+     *                  target has many states)
+     * @param file      The file to store the results in, set to null if results
+     *                  should not be stored
+     * @param name      The name of the file to store the results in
+     * @throws IOException
+     */
     public static <I, O> void learn(CompactMealy<I, O> target, String algorithm, boolean visualize, File file,
             String name) throws IOException {
         Alphabet<I> inputAlphabet = target.getInputAlphabet();
@@ -143,7 +180,7 @@ public class Main {
             throw new UnsupportedOperationException("Valid algorithms: Decompose / TTT / OLstar / Lstar");
         }
 
-        int stage = learnLoop(learner, inputAlphabet, eqOracle, false, target);
+        int stage = learnLoop(learner, inputAlphabet, eqOracle, target);
         System.out.println("Done!");
         System.out.println("Learning: " + mOracleForLearning.getStatisticalData().getSummary());
         System.out.println("Testing: " + mOracleForTesting.getStatisticalData().getSummary());
@@ -176,7 +213,8 @@ public class Main {
             }
             if (learner instanceof OutputLstar) {
                 OutputLstar<I, O> outputLearner = (OutputLstar<I, O>) learner;
-                writer.append("\nNumber of short rows: " + String.valueOf(outputLearner.getObservationTable().getShortPrefixRows().size()));
+                writer.append("\nNumber of short rows: "
+                        + String.valueOf(outputLearner.getObservationTable().getShortPrefixRows().size()));
                 writer.append("\nInconsistent count: " + String.valueOf(outputLearner.inconsistentCount));
                 writer.append("\nZero outputs count: " + String.valueOf(outputLearner.zeroOutputsCount));
                 writer.append("\nTwo outputs count: " + String.valueOf(outputLearner.twoOutputsCount));
@@ -202,20 +240,18 @@ public class Main {
             CompactMealy<Character, Object> target = constructSUL(3);
             learn(target, args[1], false, null, null);
         } else if (args[0].equals("all")) {
-            File file = new File("D:\\Data\\results_labbaf_olstar_random.txt");
-            try (Stream<Path> paths = Files.walk(Paths.get("D:\\Models\\Labbaf\\"))) {
+            File file = new File("results\\rerun.txt");
+            try (Stream<Path> paths = Files.walk(Paths.get("models"))) {
                 for (Path path : paths.filter(Files::isRegularFile).toList()) {
-                    //System.out.println("Current: " + path.toString());
                     CompactMealy<String, String> target = DOTParsers
-                        .mealy()
-                        .readModel(path.toFile())
-                        .model;
+                            .mealy()
+                            .readModel(path.toFile()).model;
                     learn(target, args[1], false, file, path.toString());
                 }
             }
         } else {
             if (args[0].equals("_")) {
-                args[0] = "..\\..\\models\\random-2-5-1.dot";
+                args[0] = "models\\random-2-5-1.dot";
             }
             CompactMealy<String, String> target = DOTParsers
                     .mealy()

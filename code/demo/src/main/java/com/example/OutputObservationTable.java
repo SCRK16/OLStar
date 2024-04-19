@@ -19,6 +19,9 @@ import net.automatalib.alphabet.GrowingMapAlphabet;
 import net.automatalib.word.Word;
 import net.automatalib.word.WordBuilder;
 
+/**
+ * Observation table used by OL*.
+ */
 public class OutputObservationTable<I, O> {
 
     private final Alphabet<I> inputAlphabet;
@@ -264,6 +267,13 @@ public class OutputObservationTable<I, O> {
         return addSuffixes(Collections.singletonList(suffix));
     }
 
+    /**
+     * Add new suffixes to the observation table. Also updates the content id maps
+     * and the output alphabet.
+     *
+     * @param suffixes List of suffixes to be added
+     * @return {@code true} if the list contained a new suffix
+     */
     public boolean addSuffixes(List<Word<I>> suffixes) {
         int suffixesCount = this.suffixes.size();
         List<Word<I>> suffixesToAdd = new ArrayList<>();
@@ -464,6 +474,12 @@ public class OutputObservationTable<I, O> {
         return null;
     }
 
+    /**
+     * Finds all rows that are inconsistent when projected to some output
+     * Two rows are inconsistent if they are equal, but their successor rows aren't
+     *
+     * @return All words that would fix an inconsistency, or null if none exist
+     */
     public List<Word<I>> findAllInconsistentRows() {
         ArrayList<Word<I>> result = new ArrayList<>();
         for (int i = 0; i < this.outputAlphabet.size(); i++) {

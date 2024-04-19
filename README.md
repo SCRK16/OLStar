@@ -9,7 +9,7 @@ Results in the form of .csv files containing all of the data used for the analys
 ## Usage instructions
 
 All code was tested to run on a Windows 10 machine. For the Java code we used OpenJDK version 17.0.9. They were run in Visual Studio Code using maven as a package manager.
-The main file takes two command line arguments. The first argument is the full filename of the model to be learned. The second argument is the name of the algorithm to be used. The options for these are:
+The main file takes two command line arguments. The first argument is the full filename of the model to be learned. The first argument may also be `toy` to use the toy example as the model to be learned. The second argument is the name of the algorithm to be used. The options for these are:
 - [L* (Angluin, 1987)](https://doi.org/10.1016/0890-5401(87)90052-6), as implemented in the LearnLib library using the SUFFIX1BY1 counterexample handler.
 - [TTT (Isberner et al., 2014)](https://doi.org/10.1007/978-3-319-11164-3_26), as implemented in the LearnLib library.
 - OL*, our new algorithm based on L* which decomposes the Mealy machine based on its outputs (but with a single observation table).

@@ -1,0 +1,20 @@
+digraph g {
+  __start0 -> s0;
+
+  s0 -> s1 [label="L/L"]
+  s0 -> s1 [label="R/R"]
+  s0 -> s0 [label="a/x"]
+  s0 -> s0 [label="b/y"]
+  s1 -> s0 [label="L/L"]
+  s1 -> s0 [label="R/R"]
+  s1 -> s1 [label="a/z"]
+  s1 -> s2 [label="b/w"]
+  s2 -> s3 [label="L/L"]
+  s2 -> s3 [label="R/R"]
+  s2 -> s1 [label="a/z"]
+  s2 -> s1 [label="b/z"]
+  s3 -> s2 [label="L/L"]
+  s3 -> s2 [label="R/R"]
+  s3 -> s3 [label="a/x"]
+  s3 -> s3 [label="b/y"]
+}

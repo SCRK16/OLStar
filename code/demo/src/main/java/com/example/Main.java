@@ -14,9 +14,13 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 //import java.nio.file.Paths;
 //import java.util.List;
+import java.util.stream.Stream;
 
 import de.learnlib.acex.AcexAnalyzers;
 import de.learnlib.algorithm.LearningAlgorithm.MealyLearner;
@@ -24,7 +28,7 @@ import de.learnlib.algorithm.ttt.mealy.TTTLearnerMealy;
 import de.learnlib.oracle.membership.MealySimulatorOracle;
 import de.learnlib.query.DefaultQuery;
 import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
-import de.learnlib.oracle.equivalence.MealyWpMethodEQOracle;
+import de.learnlib.oracle.equivalence.MealyRandomWpMethodEQOracle;
 import de.learnlib.filter.cache.mealy.MealyCacheOracle;
 import de.learnlib.filter.cache.mealy.MealyCaches;
 import de.learnlib.filter.statistic.oracle.MealyCounterOracle;
@@ -77,6 +81,9 @@ public class Main {
 
     public static <I, O> int learnLoop(MealyLearner<I, O> learner, Alphabet<I> inputAlphabet,
             MealyEquivalenceOracle<I, O> eqOracle, boolean lastSymbol, MealyMachine<?, I, ?, O> target) {
+        if (target == null) {
+            throw new IllegalStateException("Target cannot be null");
+        }
         int stage = 0;
         learner.startLearning();
         while (true) {
@@ -88,17 +95,22 @@ public class Main {
 
             // Quick check to avoid expensive final EQ.
             // We do not use this to find actual counterexamples.
-            if (target != null) {
-                Word<I> sep = Automata.findSeparatingWord(target, hypothesis, inputAlphabet);
-                if (sep == null)
-                    break;
-            }
+            Word<I> sep = Automata.findSeparatingWord(target, hypothesis, inputAlphabet);
+            if (sep == null)
+                break;
 
             // Find counterexample.
             DefaultQuery<I, Word<O>> ce = eqOracle.findCounterExample(hypothesis, inputAlphabet);
             if (ce == null)
                 throw new IllegalStateException(
                         "Equivalence Oracle couldn't find counterexample, even though a separating word exists.");
+            if (!ce.getOutput().equals(target.computeOutput(ce.getInput()))) {
+                System.out.println("In:   " + ce.getInput());
+                System.out.println("ce:   " + ce.getOutput());
+                System.out.println("real: " + target.computeOutput(ce.getInput()));
+                System.out.println("hyp:  " + hypothesis.computeOutput(ce.getInput()));
+                throw new IllegalStateException("Equivalence oracle found invalid counterexample");
+            }
             System.out.println(
                     "Counterexample: " + ce.toString() + ", hypothesis: " + hypothesis.computeOutput(ce.getInput()));
             learner.refineHypothesis(ce);
@@ -111,10 +123,10 @@ public class Main {
         Alphabet<I> inputAlphabet = target.getInputAlphabet();
         MealySimulatorOracle<I, O> mOracle = new MealySimulatorOracle<>(target);
         MealyCounterOracle<I, O> mOracleForLearning = new MealyCounterOracle<>(mOracle);
-        MealyCacheOracle<I, O> mCacheOracle = MealyCaches.createCache(inputAlphabet, mOracleForLearning);
+        MealyCacheOracle<I, O> mCacheOracle = MealyCaches.createTreeCache(inputAlphabet, mOracleForLearning);
         MealyCounterOracle<I, O> mOracleForTesting = new MealyCounterOracle<>(mOracle);
-        MealyCacheOracle<I, O> testingCacheOracle = MealyCaches.createCache(inputAlphabet, mOracleForTesting);
-        MealyWpMethodEQOracle<I, O> eqOracle = new MealyWpMethodEQOracle<>(testingCacheOracle, 3);
+        MealyCacheOracle<I, O> testingCacheOracle = MealyCaches.createTreeCache(inputAlphabet, mOracleForTesting);
+        MealyRandomWpMethodEQOracle<I, O> eqOracle = new MealyRandomWpMethodEQOracle<>(testingCacheOracle, 2, 10);
         MealyLearner<I, O> learner;
         if (algorithm.equals("Decompose")) {
             learner = DynamicMealyDecomposer.createDynamicMealyDecomposerWithCache(inputAlphabet, mOracleForLearning,
@@ -128,7 +140,7 @@ public class Main {
                     new ClassicLStarMealy<I, O>(inputAlphabet, MealyUtil.wrapWordOracle(mCacheOracle),
                             ObservationTableCEXHandlers.SUFFIX1BY1, ClosingStrategies.CLOSE_FIRST));
         } else {
-            throw new UnsupportedOperationException("Valid algorithms: Decompose / TTT / Lstar");
+            throw new UnsupportedOperationException("Valid algorithms: Decompose / TTT / OLstar / Lstar");
         }
 
         int stage = learnLoop(learner, inputAlphabet, eqOracle, false, target);
@@ -181,7 +193,7 @@ public class Main {
     public static void main(String[] args) throws IOException {
         if (args.length < 2) {
             /*
-             * System.err.println("Usage: ./Main toy <algorithm> OR ./Main _ <algorithm>");
+             * System.err.println("Usage: ./Main toy <algorithm> OR ./Main _ <algorithm>" OR ./Main all <algorithm>);
              * System.exit(1);
              */
             args = new String[] { "_", "OL*" };
@@ -190,40 +202,24 @@ public class Main {
             CompactMealy<Character, Object> target = constructSUL(3);
             learn(target, args[1], false, null, null);
         } else if (args[0].equals("all")) {
-            File file = new File("D:\\Data\\results_labbaf_olstar_all_inconsistencies.txt");
-            for (int i = 195; i < 199; i++) { // Note: Couldn't learn 188 because of OutOfMemoryError, 2725 short rows found
-                System.out.println("Current:" + String.valueOf(i));
-                if (i == 95) continue; // Benchmark 95 doesn't exist
-                CompactMealy<String, String> target = DOTParsers
-                    .mealy()
-                    .readModel(new File(
-                        "D:\\Models\\Labbaf\\" + String.valueOf(i) + ".dot"
-                    )).model;
-                learn(target, args[1], false, file, String.valueOf(i));
+            File file = new File("D:\\Data\\results_labbaf_olstar_random.txt");
+            try (Stream<Path> paths = Files.walk(Paths.get("D:\\Models\\Labbaf\\"))) {
+                for (Path path : paths.filter(Files::isRegularFile).toList()) {
+                    //System.out.println("Current: " + path.toString());
+                    CompactMealy<String, String> target = DOTParsers
+                        .mealy()
+                        .readModel(path.toFile())
+                        .model;
+                    learn(target, args[1], false, file, path.toString());
+                }
             }
         } else {
             if (args[0].equals("_")) {
-                // args[0] = "m54";
-                args[0] = "106";
-                // args[0] = "kopie";
+                args[0] = "..\\..\\models\\random-2-5-1.dot";
             }
             CompactMealy<String, String> target = DOTParsers
                     .mealy()
-                    .readModel(new File(
-                            // "D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkASMLRERS2019\\" +
-                            "D:\\Models\\Labbaf\\" +
-                                    args[0]
-                                    + ".dot")).model;
-
-            /*
-             * if (args[0].equals("_")) {
-             * args[0] = "bbara_minimized";
-             * }
-             * CircuitParser parser = new CircuitParser(Paths
-             * .get("D:\\Models\\models\\benchmarks\\Mealy\\principle\\BenchmarkCircuits\\" + args[0] + "
-             * .dot"));
-             * CompactMealy<String, List<String>> target = parser.createMachine();
-             */
+                    .readModel(new File(args[0])).model;
             learn(target, args[1], false, null, null);
         }
     }

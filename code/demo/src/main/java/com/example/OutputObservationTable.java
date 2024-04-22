@@ -22,22 +22,24 @@ import net.automatalib.word.WordBuilder;
 /**
  * Observation table used by OL*.
  */
-public class OutputObservationTable<I, O> {
+public class OutputObservationTable<I, O, D> {
 
     private final Alphabet<I> inputAlphabet;
     private final GrowingAlphabet<O> outputAlphabet;
 
     private final MembershipOracle<I, Word<O>> mqOracle;
 
+    private List<Map<O, D>> outputMaps = new ArrayList<>();
+
     private final List<OutputRow<I, O>> shortPrefixRows = new ArrayList<>();
     private final List<OutputRow<I, O>> longPrefixRows = new ArrayList<>();
     private final List<OutputRow<I, O>> allRows = new ArrayList<>();
     private final Map<List<Word<O>>, Integer> rowContentIds = new HashMap<>();
     /**
-     * For every output symbol, maps the contents of a row for that output to
+     * For every output map, maps the contents of a row for that output map to
      * the ids of the short prefix rows with those contents
      */
-    private final List<Map<List<Word<Boolean>>, List<Integer>>> outputContentIds = new ArrayList<>();
+    private List<Map<List<Word<D>>, List<Integer>>> outputContentIds = new ArrayList<>();
 
     private final List<Word<I>> suffixes = new ArrayList<>();
     private final Set<Word<I>> suffixSet = new HashSet<>();
@@ -126,6 +128,19 @@ public class OutputObservationTable<I, O> {
         }
     }
 
+    public void setOutputMaps(List<Map<O, D>> outputMaps) {
+        this.outputMaps = outputMaps;
+        this.outputContentIds = new ArrayList<>(this.outputMaps.size());
+        for (int i = 0; i < this.outputMaps.size(); i++) {
+            this.outputContentIds.add(new HashMap<>());
+        }
+        this.updateOutputContentIds();
+    }
+
+    public List<Map<O, D>> getOutputMaps() {
+        return this.outputMaps;
+    }
+
     /**
      * Check the list of queries for previously unseen output symbols, and add them
      * to the output alphabet
@@ -152,22 +167,7 @@ public class OutputObservationTable<I, O> {
      * @param outputSymbol The output symbol to add
      */
     private boolean addOutputSymbol(O outputSymbol) {
-        if (!outputAlphabet.add(outputSymbol)) {
-            return false;
-        }
-        HashMap<List<Word<Boolean>>, List<Integer>> outputMap = new HashMap<>();
-        for (OutputRow<I, O> spRow : this.shortPrefixRows) {
-            List<Word<O>> row = this.table.get(spRow.getRowId());
-            List<Word<Boolean>> outputRow = this.toOutputWords(row, outputSymbol);
-            List<Integer> outputIds = outputMap.getOrDefault(outputRow, new ArrayList<>());
-            outputIds.add(spRow.getRowId());
-            outputMap.put(outputRow, outputIds);
-        }
-        this.outputContentIds.add(outputMap);
-        for (OutputRow<I, O> lpRow : this.longPrefixRows) {
-            lpRow.addShortRow(null);
-        }
-        return true;
+        return this.outputAlphabet.add(outputSymbol);
     }
 
     /**
@@ -183,7 +183,7 @@ public class OutputObservationTable<I, O> {
         List<O> outputContents = rowContents.stream().limit(inputAlphabet.size()).map(Word::lastSymbol).toList();
         row.setOutputs(outputContents);
         if (row.isShortPrefixRow()) {
-            this.updateOutputContentIds(row, rowContents, 0);
+            this.updateContentIds(row, rowContents, 0);
         }
     }
 
@@ -195,12 +195,12 @@ public class OutputObservationTable<I, O> {
      * @param output      The output to be compared to
      * @return The transformed list of boolean words
      */
-    private List<Word<Boolean>> toOutputWords(List<Word<O>> rowContents, O output) {
-        List<Word<Boolean>> outputRowContents = new ArrayList<>(rowContents.size());
+    private List<Word<D>> toOutputWords(List<Word<O>> rowContents, Map<O, D> map) {
+        List<Word<D>> outputRowContents = new ArrayList<>(rowContents.size());
         for (Word<O> word : rowContents) {
-            WordBuilder<Boolean> wb = new WordBuilder<>();
+            WordBuilder<D> wb = new WordBuilder<>();
             for (O current : word) {
-                wb.add(current.equals(output));
+                wb.add(map.get(current));
             }
             outputRowContents.add(wb.toWord());
         }
@@ -296,18 +296,23 @@ public class OutputObservationTable<I, O> {
                 tableRow.add(query.getOutput());
             }
             if (row.isShortPrefixRow()) {
-                updateOutputContentIds(row, tableRow, suffixesCount);
+                updateContentIds(row, tableRow, suffixesCount);
             }
         }
         this.growOutputAlphabet(queries);
         return this.suffixes.size() > suffixesCount;
     }
 
+    private void updateContentIds(OutputRow<I, O> row, List<Word<O>> rowContents, int oldCount) {
+        List<Word<O>> previousRowContents = rowContents.subList(0, oldCount);
+        this.rowContentIds.remove(previousRowContents);
+        this.rowContentIds.putIfAbsent(rowContents, row.getRowId());
+    }
+
     /**
      * Update the {@code outputContentIds} with the new suffixes. After executing
-     * this
-     * function, {@code outputContentIds} will map {@code rowContents} to the same
-     * integer that {@code rowContents.subList(0, oldCount)} was mapped to.
+     * this function, {@code outputContentIds} will map {@code rowContents} to the
+     * same integer that {@code rowContents.subList(0, oldCount)} was mapped to.
      *
      * @param rowContents The row contents after adding the suffixes
      * @param oldCount    The old number of suffixes
@@ -316,21 +321,21 @@ public class OutputObservationTable<I, O> {
      *           (so the suffixes are sorted by when they are added, not
      *           lexicographically)
      */
-    private void updateOutputContentIds(OutputRow<I, O> row, List<Word<O>> rowContents, int oldCount) {
-        List<Word<O>> previousRowContents = rowContents.subList(0, oldCount);
-        this.rowContentIds.remove(previousRowContents);
-        this.rowContentIds.putIfAbsent(rowContents, row.getRowId());
-        for (int i = 0; i < this.outputAlphabet.size(); i++) {
-            O output = this.outputAlphabet.getSymbol(i);
-            List<Word<Boolean>> outputRow = this.toOutputWords(rowContents, output);
-            List<Word<Boolean>> previousRow = outputRow.subList(0, oldCount);
-            this.outputContentIds.get(i).get(previousRow).remove(Integer.valueOf(row.getRowId()));
-            if (this.outputContentIds.get(i).get(previousRow).isEmpty()) {
-                this.outputContentIds.get(i).remove(previousRow);
+    private void updateOutputContentIds() {
+        this.outputContentIds = new ArrayList<>(this.outputMaps.size());
+        for (int i = 0; i < this.outputMaps.size(); i++) {
+            Map<List<Word<D>>, List<Integer>> iMap = new HashMap<>();
+            Map<O, D> outputMap = this.outputMaps.get(i);
+            for(OutputRow<I, O> curRow : this.shortPrefixRows) {
+                int curRowId = curRow.getRowId();
+                List<Word<O>> curRowContents = this.table.get(curRowId);
+                List<Word<D>> curOutputContents = this.toOutputWords(curRowContents, outputMap);
+                List<Integer> outputIds = iMap.getOrDefault(curOutputContents, new ArrayList<>());
+                iMap.remove(outputIds);
+                outputIds.add(curRowId);
+                iMap.put(curOutputContents, outputIds);
             }
-            List<Integer> outputIds = this.outputContentIds.get(i).getOrDefault(outputRow, new ArrayList<>());
-            outputIds.add(row.getRowId());
-            this.outputContentIds.get(i).put(outputRow, outputIds);
+            this.outputContentIds.add(iMap);
         }
     }
 
@@ -346,12 +351,6 @@ public class OutputObservationTable<I, O> {
         newShortRow.makeShort(this.inputAlphabet.size());
         List<Word<O>> rowContents = this.table.get(newShortRow.getRowId());
         this.rowContentIds.putIfAbsent(rowContents, newShortRow.getRowId());
-        for (int i = 0; i < outputAlphabet.size(); i++) { // Update outputContentIds
-            List<Word<Boolean>> outputContents = this.toOutputWords(rowContents, this.outputAlphabet.getSymbol(i));
-            List<Integer> outputIds = this.outputContentIds.get(i).getOrDefault(outputContents, new ArrayList<>());
-            outputIds.add(newShortRow.getRowId());
-            this.outputContentIds.get(i).put(outputContents, outputIds);
-        }
         for (int i = 0; i < inputAlphabet.size(); i++) { // Create new long prefix rows
             I sym = inputAlphabet.getSymbol(i);
             Word<I> lp = newShortRow.getLabel().append(sym);
@@ -415,11 +414,11 @@ public class OutputObservationTable<I, O> {
     public List<List<OutputRow<I, O>>> findUnclosedRows() {
         List<Map<List<Word<Boolean>>, Integer>> unclosedIndexes = new ArrayList<>(this.outputAlphabet.size());
         List<List<OutputRow<I, O>>> unclosed = new ArrayList<>();
-        for (int i = 0; i < this.outputAlphabet.size(); i++) {
+        for (int i = 0; i < this.outputMaps.size(); i++) {
             unclosedIndexes.add(new HashMap<>());
             for (OutputRow<I, O> row : this.allRows) {
                 List<Word<O>> rowContents = this.table.get(row.getRowId());
-                List<Word<Boolean>> outputContents = this.toOutputWords(rowContents, this.outputAlphabet.getSymbol(i));
+                List<Word<D>> outputContents = this.toOutputWords(rowContents, this.outputMaps.get(i));
                 List<Integer> contentIds = this.outputContentIds.get(i).get(outputContents);
                 if (contentIds == null) { // The row is unclosed for this output
                     Integer unclosedIndex = unclosedIndexes.get(i).get(outputContents);
@@ -443,23 +442,23 @@ public class OutputObservationTable<I, O> {
      * @return A word that would fix an inconsistency, or null if none exist
      */
     public Word<I> findInconsistentRows() {
-        for (int i = 0; i < this.outputAlphabet.size(); i++) {
-            Map<List<Word<Boolean>>, List<Integer>> currentOutputContentIds = this.outputContentIds.get(i);
+        for (int i = 0; i < this.outputMaps.size(); i++) {
+            Map<List<Word<D>>, List<Integer>> currentOutputContentIds = this.outputContentIds.get(i);
             for (List<Integer> currentList : currentOutputContentIds.values()) {
                 if (currentList.size() <= 1) {
                     continue;
                 }
                 for (int a = 0; a < this.inputAlphabet.size(); a++) {
-                    List<List<Word<Boolean>>> successors = new ArrayList<>();
+                    List<List<Word<D>>> successors = new ArrayList<>();
                     for (Integer current : currentList) { // Build successor rows
                         OutputRow<I, O> currentRow = this.allRows.get(current);
                         OutputRow<I, O> sucRow = currentRow.getSuccessor(a);
                         List<Word<O>> sucOutputs = this.table.get(sucRow.getRowId());
-                        successors.add(this.toOutputWords(sucOutputs, this.outputAlphabet.getSymbol(i)));
+                        successors.add(this.toOutputWords(sucOutputs, this.outputMaps.get(i)));
                     }
-                    List<Word<Boolean>> first = successors.get(0);
+                    List<Word<D>> first = successors.get(0);
                     for (int j = 1; j < successors.size(); j++) { // Check they are all equal
-                        List<Word<Boolean>> other = successors.get(j);
+                        List<Word<D>> other = successors.get(j);
                         for (int k = 0; k < first.size(); k++) {
                             if (!first.get(k).equals(other.get(k))) { // Inconsistency found
                                 I infix = this.inputAlphabet.getSymbol(a);
@@ -482,23 +481,23 @@ public class OutputObservationTable<I, O> {
      */
     public List<Word<I>> findAllInconsistentRows() {
         ArrayList<Word<I>> result = new ArrayList<>();
-        for (int i = 0; i < this.outputAlphabet.size(); i++) {
-            Map<List<Word<Boolean>>, List<Integer>> currentOutputContentIds = this.outputContentIds.get(i);
+        for (int i = 0; i < this.outputMaps.size(); i++) {
+            Map<List<Word<D>>, List<Integer>> currentOutputContentIds = this.outputContentIds.get(i);
             for (List<Integer> currentList : currentOutputContentIds.values()) {
                 if (currentList.size() <= 1) {
                     continue;
                 }
                 for (int a = 0; a < this.inputAlphabet.size(); a++) {
-                    List<List<Word<Boolean>>> successors = new ArrayList<>();
+                    List<List<Word<D>>> successors = new ArrayList<>();
                     for (Integer current : currentList) { // Build successor rows
                         OutputRow<I, O> currentRow = this.allRows.get(current);
                         OutputRow<I, O> sucRow = currentRow.getSuccessor(a);
                         List<Word<O>> sucOutputs = this.table.get(sucRow.getRowId());
-                        successors.add(this.toOutputWords(sucOutputs, this.outputAlphabet.getSymbol(i)));
+                        successors.add(this.toOutputWords(sucOutputs, this.outputMaps.get(i)));
                     }
-                    List<Word<Boolean>> first = successors.get(0);
+                    List<Word<D>> first = successors.get(0);
                     for (int j = 1; j < successors.size(); j++) { // Check they are all equal
-                        List<Word<Boolean>> other = successors.get(j);
+                        List<Word<D>> other = successors.get(j);
                         for (int k = 0; k < first.size(); k++) {
                             if (!first.get(k).equals(other.get(k))) { // Inconsistency found
                                 I infix = this.inputAlphabet.getSymbol(a);

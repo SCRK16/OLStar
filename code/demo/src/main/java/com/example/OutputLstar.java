@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
@@ -17,6 +18,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import de.learnlib.algorithm.LearningAlgorithm.MealyLearner;
 import de.learnlib.query.DefaultQuery;
 import net.automatalib.alphabet.Alphabet;
+import net.automatalib.alphabet.GrowingAlphabet;
 import net.automatalib.automaton.transducer.MealyMachine;
 import net.automatalib.common.util.Pair;
 import net.automatalib.word.Word;
@@ -24,7 +26,7 @@ import net.automatalib.word.WordBuilder;
 
 public class OutputLstar<I, O> implements MealyLearner<I, O> {
 
-    private OutputObservationTable<I, O> table;
+    private OutputObservationTable<I, O, Integer> table;
     private final MembershipOracle<I, Word<O>> mqOracle;
     private final Alphabet<I> inputAlphabet;
     private final boolean checkConsistency;
@@ -57,7 +59,13 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
 
     @Override
     public MealyMachine<?, I, ?, O> getHypothesisModel() {
-        return new OutputMealyMachine(inputAlphabet, this.table.getOutputAlphabet(), this.table.getShortPrefixRows());
+        return this.getHypothesisInternal();
+    }
+
+    private OutputMealyMachine<Integer> getHypothesisInternal() {
+        List<Map<O, Integer>> outputMaps = this.table.getOutputMaps();
+        return new OutputMealyMachine<>(inputAlphabet, this.table.getShortPrefixRows(),
+                outputMaps, this.computeReverseMap(outputMaps));
     }
 
     @Override
@@ -149,7 +157,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         this.fixReachableDefects();
     }
 
-    public OutputObservationTable<I, O> getObservationTable() {
+    public OutputObservationTable<I, O, Integer> getObservationTable() {
         return this.table;
     }
 
@@ -164,6 +172,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         if (this.table.isRegularClosed()) {
             return false;
         }
+        this.table.setOutputMaps(this.singleOutputMap());
         List<List<OutputRow<I, O>>> unclosed = this.table.findUnclosedRows();
         while (!unclosed.isEmpty()) {
             OutputRow<I, O> newShortRow = this.selectClosingRow(unclosed);
@@ -172,6 +181,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             if (this.table.isRegularClosed()) {
                 return true;
             }
+            this.table.setOutputMaps(this.singleOutputMap());
             unclosed = this.table.findUnclosedRows();
         }
         if (checkConsistency && useFirstInconsistency) {
@@ -201,84 +211,17 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     }
 
     /**
-     * Run a breadth first search to find if two components output 1 at the same
-     * time
-     *
-     * @param hypothesis The hypothesis to be searched
-     * @return Query (already answered) for the word which leads to 2 outputs, or
-     *         null if none exist
+     * For each transition, there must be exactly one output. If there are
+     * 0 or >= 2, then there is at least one output for which we have a
+     * counterexample. This function finds such counterexamples by enumerating the
+     * reachable 'states' of the automaton that would be created from this table.
+     * The states are represented by lists of rows of the table.
+     * 
+     * @return The found counterexample, or null if none could be found
+     * @implSpec Assumes that the table is closed before this is called
      */
-    private DefaultQuery<I, Word<O>> findTwoOutputs(ProjectedOutputMealyMachine hypothesis) {
-        Set<Pair<OutputRow<I, O>, OutputRow<I, O>>> reach = new HashSet<>();
-        Queue<Pair<OutputRow<I, O>, OutputRow<I, O>>> bfsQueue = new ArrayDeque<>();
-        Pair<OutputRow<I, O>, OutputRow<I, O>> init = hypothesis.getInitialState();
-        bfsQueue.add(init);
-        Queue<WordBuilder<I>> accessSequences = new ArrayDeque<>();
-        accessSequences.add(new WordBuilder<>());
-
-        Pair<OutputRow<I, O>, OutputRow<I, O>> curr;
-        while ((curr = bfsQueue.poll()) != null) {
-            WordBuilder<I> wb = accessSequences.poll();
-            if (reach.contains(curr)) {
-                continue;
-            }
-
-            for (I in : this.inputAlphabet) {
-                WordBuilder<I> wbin = new WordBuilder<>(wb.toWord());
-                wbin.add(in);
-                Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>> transition = hypothesis
-                        .getTransition(curr, in);
-                if (transition.getFirst().getFirst() && transition.getSecond().getFirst()) {// We have found a defect
-                    this.twoOutputsCount += 1;
-                    Word<I> w = wbin.toWord();
-                    DefaultQuery<I, Word<O>> ce = new DefaultQuery<>(w);
-                    ce.answer(this.mqOracle.answerQuery(w));
-                    return ce;
-                }
-                Pair<OutputRow<I, O>, OutputRow<I, O>> succ = hypothesis.getSuccessor(transition);
-                if (succ == null)
-                    continue;
-
-                if (!reach.contains(succ)) {
-                    bfsQueue.add(succ);
-                    accessSequences.add(wbin);
-                }
-            }
-            reach.add(curr);
-        }
-        return null;
-    }
-
-    /**
-     * Find input word for which multiple components output 1.
-     * This check is done pairwise for each pair of outputs.
-     *
-     * @return Query for which multiple components output 1
-     */
-    private DefaultQuery<I, Word<O>> findMultipleOutputs() {
-        OutputMealyMachine hypothesis = new OutputMealyMachine(inputAlphabet, this.table.getOutputAlphabet(),
-                this.table.getShortPrefixRows());
-        int n = this.table.getOutputAlphabet().size();
-        for (int firstIndex = 0; firstIndex < n - 1; firstIndex++) {
-            for (int secondIndex = firstIndex + 1; secondIndex < n; secondIndex++) {
-                ProjectedOutputMealyMachine currentMachine = hypothesis.project(firstIndex, secondIndex);
-                DefaultQuery<I, Word<O>> ce = this.findTwoOutputs(currentMachine);
-                if (ce != null) {
-                    return ce;
-                }
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Do a breadth first search for an input word for which no component ouput 1.
-     *
-     * @return Query (already answered) for which the defect happens
-     */
-    private DefaultQuery<I, Word<O>> findZeroOutputs() {
-        OutputMealyMachine hypothesis = new OutputMealyMachine(
-                inputAlphabet, this.table.getOutputAlphabet(), this.table.getShortPrefixRows());
+    public DefaultQuery<I, Word<O>> findReachableDefect() {
+        OutputMealyMachine<Integer> hypothesis = this.getHypothesisInternal();
         System.out.println("States: " + hypothesis.getStates().size());
         Set<List<OutputRow<I, O>>> reach = new HashSet<>();
         Queue<List<OutputRow<I, O>>> bfsQueue = new ArrayDeque<>();
@@ -297,11 +240,14 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             for (I in : this.inputAlphabet) {
                 WordBuilder<I> wbin = new WordBuilder<>(wb.toWord());
                 wbin.add(in);
-                List<Pair<Boolean, OutputRow<I, O>>> transition = hypothesis.getTransition(curr, in);
-                List<Boolean> outputs = transition.stream().map(Pair::getFirst).toList();
-                long trueCount = Collections.frequency(outputs, true);
-                if (trueCount == 0) {// We have found a defect
-                    this.zeroOutputsCount += 1;
+                List<Pair<Integer, OutputRow<I, O>>> transition = hypothesis.getTransition(curr, in);
+                Set<O> outputs = hypothesis.getTransitionOutputSet(transition);
+                if (outputs.size() != 1) {// We have found a defect
+                    if (outputs.size() == 1) {
+                        this.zeroOutputsCount += 1;
+                    } else {
+                        this.twoOutputsCount += 1;
+                    }
                     Word<I> w = wbin.toWord();
                     DefaultQuery<I, Word<O>> ce = new DefaultQuery<>(w);
                     ce.answer(this.mqOracle.answerQuery(w));
@@ -322,35 +268,18 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     }
 
     /**
-     * For each transition, there must be exactly one output. If there are
-     * 0 or >= 2, then there is at least one output for which we have a
-     * counterexample. This function finds such counterexamples by enumerating the
-     * reachable 'states' of the automaton that would be created from this table.
-     * The states are represented by lists of rows of the table.
-     * 
-     * @return The found counterexample, or null if none could be found
-     * @implSpec Assumes that the table is closed before this is called
-     */
-    public DefaultQuery<I, Word<O>> findReachableDefect() {
-        DefaultQuery<I, Word<O>> multipleOutputs = this.findMultipleOutputs();
-        return multipleOutputs != null ? multipleOutputs : this.findZeroOutputs();
-    }
-
-    /**
      * Retry a previous defect to see if it still occurs
      * 
      * @param ce The query for which the defect happened
      * @return True if the defect still occurs
      */
     private boolean retryDefect(DefaultQuery<I, Word<O>> ce) {
-        OutputMealyMachine hypothesis = new OutputMealyMachine(
-                inputAlphabet, this.table.getOutputAlphabet(), this.table.getShortPrefixRows());
+        OutputMealyMachine<Integer> hypothesis = this.getHypothesisInternal();
         List<OutputRow<I, O>> state = hypothesis.getInitialState();
         for (I in : ce.getInput()) {
-            List<Pair<Boolean, OutputRow<I, O>>> transition = hypothesis.getTransition(state, in);
-            List<Boolean> outputs = transition.stream().map(Pair::getFirst).toList();
-            long trueCount = Collections.frequency(outputs, true);
-            if (trueCount != 1) {
+            List<Pair<Integer, OutputRow<I, O>>> transition = hypothesis.getTransition(state, in);
+            Set<O> outputs = hypothesis.getTransitionOutputSet(transition);
+            if (outputs.size() != 1) {
                 System.out.println("Same defect");
                 return true;
             }
@@ -376,32 +305,67 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         System.out.println("No more defects");
     }
 
+    private List<Map<O, Integer>> singleOutputMap() {
+        List<Map<O, Integer>> result = new ArrayList<>();
+        GrowingAlphabet<O> outputAlphabet = this.table.getOutputAlphabet();
+        for (O o : outputAlphabet) {
+            HashMap<O, Integer> oMap = new HashMap<>();
+            oMap.put(o, 1);
+            for (O c : outputAlphabet) {
+                if (!c.equals(o)) {
+                    oMap.put(c, 0);
+                }
+            }
+            result.add(oMap);
+        }
+        return result;
+    }
+
+    private List<Map<Integer, Set<O>>> computeReverseMap(List<Map<O, Integer>> outputMap) {
+        List<Map<Integer, Set<O>>> result = new ArrayList<>();
+        GrowingAlphabet<O> outputAlphabet = this.table.getOutputAlphabet();
+        for (Map<O, Integer> oMap : outputMap) {
+            Map<Integer, Set<O>> curMap = new HashMap<>();
+            for (O o : outputAlphabet) {
+                Integer i = oMap.get(o);
+                Set<O> curList = curMap.getOrDefault(i, new HashSet<>());
+                curList.add(o);
+                curMap.put(i, curList);
+            }
+            result.add(curMap);
+        }
+        return result;
+    }
+
     /**
      * Creates a Mealy machine from a list of rows
      */
-    public class OutputMealyMachine
-            implements MealyMachine<List<OutputRow<I, O>>, I, List<Pair<Boolean, OutputRow<I, O>>>, O> {
+    public class OutputMealyMachine<D>
+            implements MealyMachine<List<OutputRow<I, O>>, I, List<Pair<D, OutputRow<I, O>>>, O> {
 
         Alphabet<I> inputAlphabet;
-        Alphabet<O> outputAlphabet;
         /**
          * Short prefix rows. This is the underlying state space of the automaton.
          */
         List<OutputRow<I, O>> rows;
+        List<Map<O, D>> outputMaps;
+        List<Map<D, Set<O>>> outputIndicator;
         Collection<List<OutputRow<I, O>>> cachedStates;
 
-        public OutputMealyMachine(Alphabet<I> inputAlphabet, Alphabet<O> outputAlphabet, List<OutputRow<I, O>> rows) {
+        public OutputMealyMachine(Alphabet<I> inputAlphabet, List<OutputRow<I, O>> rows,
+                List<Map<O, D>> outputMaps, List<Map<D, Set<O>>> outputIndicator) {
             if (!rows.get(0).getLabel().isEmpty()) {
                 throw new IllegalStateException(
                         "OutputMealyMachine: The first element in the rows list should correspond to the empty word");
             }
             this.inputAlphabet = inputAlphabet;
-            this.outputAlphabet = outputAlphabet;
             this.rows = rows;
+            this.outputMaps = outputMaps;
+            this.outputIndicator = outputIndicator;
         }
 
         @Override
-        public List<OutputRow<I, O>> getSuccessor(List<Pair<Boolean, OutputRow<I, O>>> transition) {
+        public List<OutputRow<I, O>> getSuccessor(List<Pair<D, OutputRow<I, O>>> transition) {
             return transition.stream().map(Pair::getSecond).toList();
         }
 
@@ -443,14 +407,13 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         }
 
         @Override
-        public @Nullable List<Pair<Boolean, OutputRow<I, O>>> getTransition(List<OutputRow<I, O>> state, I input) {
+        public @Nullable List<Pair<D, OutputRow<I, O>>> getTransition(List<OutputRow<I, O>> state, I input) {
             int inputIndex = inputAlphabet.getSymbolIndex(input);
-            ArrayList<Pair<Boolean, OutputRow<I, O>>> transition = new ArrayList<>();
+            ArrayList<Pair<D, OutputRow<I, O>>> transition = new ArrayList<>();
             for (int i = 0; i < state.size(); i++) {
                 OutputRow<I, O> currentRow = state.get(i);
                 OutputRow<I, O> nextRow = currentRow.getSuccessor(inputIndex);
-                O currentOutput = outputAlphabet.getSymbol(i);
-                Boolean nextOutput = currentRow.getOutput(inputIndex).equals(currentOutput);
+                D nextOutput = this.outputMaps.get(i).get(currentRow.getOutput(inputIndex));
                 transition.add(Pair.of(nextOutput, nextRow.getShortRow(i)));
             }
             return transition;
@@ -461,130 +424,23 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             return null;
         }
 
-        @Override
-        public O getTransitionOutput(List<Pair<Boolean, OutputRow<I, O>>> transition) {
-            for (int i = 0; i < transition.size(); i++) {
-                if (transition.get(i).getFirst()) {
-                    return this.outputAlphabet.getSymbol(i);
-                }
+        public Set<O> getTransitionOutputSet(List<Pair<D, OutputRow<I, O>>> transition) {
+            D firstOutput = transition.get(0).getFirst();
+            Set<O> outputs = new HashSet<>(this.outputIndicator.get(0).get(firstOutput));
+            for (int i = 1; i < transition.size(); i++) {
+                D iOutput = transition.get(i).getFirst();
+                outputs.retainAll(this.outputIndicator.get(i).get(iOutput));
             }
-            return null;
-        }
-
-        /**
-         * Project the Mealy machine on two outputs.
-         * This can be used to check if two outputs are active at the same time.
-         * Checking for multiple outputs in this way is more space efficient,
-         * since the projected machines have a smaller state space.
-         *
-         * @param firstIndex  The index of the first output
-         * @param secondIndex The index of the second output
-         * @return
-         */
-        public ProjectedOutputMealyMachine project(int firstIndex, int secondIndex) {
-            return new ProjectedOutputMealyMachine(this.inputAlphabet, this.outputAlphabet, this.rows,
-                    firstIndex, secondIndex);
-        }
-    }
-
-    /**
-     * Creates a Mealy machine which only outputs the two specified outputs,
-     * and outputs null when neither output is active.
-     */
-    public class ProjectedOutputMealyMachine
-            implements
-            MealyMachine<Pair<OutputRow<I, O>, OutputRow<I, O>>, I, Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>>, O> {
-
-        Alphabet<I> inputAlphabet;
-        O firstOutput;
-        O secondOutput;
-        /**
-         * Short prefix rows. This is the underlying state space of the automaton.
-         */
-        List<OutputRow<I, O>> rows;
-        Collection<Pair<OutputRow<I, O>, OutputRow<I, O>>> cachedStates;
-        int firstIndex;
-        int secondIndex;
-
-        public ProjectedOutputMealyMachine(Alphabet<I> inputAlphabet, Alphabet<O> outputAlphabet,
-                List<OutputRow<I, O>> rows, int firstIndex, int secondIndex) {
-            this.inputAlphabet = inputAlphabet;
-            this.firstOutput = outputAlphabet.getSymbol(firstIndex);
-            this.secondOutput = outputAlphabet.getSymbol(secondIndex);
-            this.rows = rows;
-            this.firstIndex = firstIndex;
-            this.secondIndex = secondIndex;
+            return outputs;
         }
 
         @Override
-        public Pair<OutputRow<I, O>, OutputRow<I, O>> getSuccessor(
-                Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>> transition) {
-            return Pair.of(transition.getFirst().getSecond(), transition.getSecond().getSecond());
-        }
-
-        @Override
-        public Collection<Pair<OutputRow<I, O>, OutputRow<I, O>>> getStates() {
-            if (cachedStates != null) {
-                return cachedStates;
+        public O getTransitionOutput(List<Pair<D, OutputRow<I, O>>> transition) {
+            Set<O> outputs = this.getTransitionOutputSet(transition);
+            if (outputs.size() != 1) {
+                throw new IllegalStateException("Output for Mealy machine was not well-defined: " + transition.toString());
             }
-            Set<Pair<OutputRow<I, O>, OutputRow<I, O>>> reach = new HashSet<>();
-            Queue<Pair<OutputRow<I, O>, OutputRow<I, O>>> bfsQueue = new ArrayDeque<>();
-
-            Pair<OutputRow<I, O>, OutputRow<I, O>> init = getInitialState();
-
-            bfsQueue.add(init);
-
-            Pair<OutputRow<I, O>, OutputRow<I, O>> curr;
-            while ((curr = bfsQueue.poll()) != null) {
-                if (reach.contains(curr))
-                    continue;
-
-                for (I in : this.inputAlphabet) {
-                    Pair<OutputRow<I, O>, OutputRow<I, O>> succ = getSuccessor(curr, in);
-                    if (succ == null)
-                        continue;
-
-                    if (!reach.contains(succ)) {
-                        bfsQueue.add(succ);
-                    }
-                }
-                reach.add(curr);
-            }
-            cachedStates = reach;
-            return cachedStates;
-        }
-
-        @Override
-        public @Nullable Pair<OutputRow<I, O>, OutputRow<I, O>> getInitialState() {
-            List<OutputRow<I, O>> initial = this.rows.get(0).getShortRows();
-            return Pair.of(initial.get(firstIndex), initial.get(secondIndex));
-        }
-
-        @Override
-        public @Nullable Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>> getTransition(
-                Pair<OutputRow<I, O>, OutputRow<I, O>> state, I input) {
-            int inputIndex = inputAlphabet.getSymbolIndex(input);
-            OutputRow<I, O> firstSuccessor = state.getFirst().getSuccessor(inputIndex).getShortRow(this.firstIndex);
-            Boolean firstTrue = state.getFirst().getOutput(inputIndex).equals(this.firstOutput);
-            OutputRow<I, O> secondSuccessor = state.getSecond().getSuccessor(inputIndex).getShortRow(this.secondIndex);
-            Boolean secondTrue = state.getSecond().getOutput(inputIndex).equals(this.secondOutput);
-            return Pair.of(Pair.of(firstTrue, firstSuccessor), Pair.of(secondTrue, secondSuccessor));
-        }
-
-        @Override
-        public Void getStateProperty(Pair<OutputRow<I, O>, OutputRow<I, O>> state) {
-            return null;
-        }
-
-        @Override
-        public O getTransitionOutput(Pair<Pair<Boolean, OutputRow<I, O>>, Pair<Boolean, OutputRow<I, O>>> transition) {
-            if (transition.getFirst().getFirst()) {
-                return this.firstOutput;
-            }
-            if (transition.getSecond().getFirst()) {
-                return this.secondOutput;
-            }
-            return null;
+            return outputs.iterator().next();
         }
     }
 }

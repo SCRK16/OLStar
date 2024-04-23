@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -29,6 +30,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     private OutputObservationTable<I, O, Integer> table;
     private final MembershipOracle<I, Word<O>> mqOracle;
     private final Alphabet<I> inputAlphabet;
+    Supplier<List<Map<O, Integer>>> outputMapSupplier;
     private final boolean checkConsistency;
     private final boolean useFirstInconsistency;
     public int inconsistentCount = 0;
@@ -55,6 +57,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         this.checkConsistency = checkConsistency;
         this.useFirstInconsistency = useFirstInconsistency;
         this.table = new OutputObservationTable<>(inputAlphabet, membershipOracle);
+        this.outputMapSupplier = this::singleOutputMap;
     }
 
     @Override
@@ -172,7 +175,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         if (this.table.isRegularClosed()) {
             return false;
         }
-        this.table.setOutputMaps(this.singleOutputMap());
+        this.table.setOutputMaps(this.outputMapSupplier.get());
         List<List<OutputRow<I, O>>> unclosed = this.table.findUnclosedRows();
         while (!unclosed.isEmpty()) {
             OutputRow<I, O> newShortRow = this.selectClosingRow(unclosed);
@@ -181,7 +184,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             if (this.table.isRegularClosed()) {
                 return true;
             }
-            this.table.setOutputMaps(this.singleOutputMap());
+            this.table.setOutputMaps(this.outputMapSupplier.get());
             unclosed = this.table.findUnclosedRows();
         }
         if (checkConsistency && useFirstInconsistency) {
@@ -305,6 +308,14 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         System.out.println("No more defects");
     }
 
+    /**
+     * Creates a map for every output, where in each map a single output is 1 and
+     * every other output is send to 0.
+     * 
+     * @return List of maps, where every map sends a single output to 1
+     *         and the rest to 0
+     */
+    @SuppressWarnings("unused")
     private List<Map<O, Integer>> singleOutputMap() {
         List<Map<O, Integer>> result = new ArrayList<>();
         GrowingAlphabet<O> outputAlphabet = this.table.getOutputAlphabet();
@@ -318,6 +329,25 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             }
             result.add(oMap);
         }
+        return result;
+    }
+
+    /**
+     * Creates a single map, which sends each output to a unique integer.
+     * By using this map for OL*, it simulates the original L* algorithm.
+     * 
+     * @return List of maps, where the only element in the list sends each output to
+     *         a unique integer
+     */
+    @SuppressWarnings("unused")
+    private List<Map<O, Integer>> LstarMap() {
+        Map<O, Integer> identity = new HashMap<>();
+        GrowingAlphabet<O> outputAlphabet = this.table.getOutputAlphabet();
+        for (int i = 0; i < outputAlphabet.size(); i++) {
+            identity.put(outputAlphabet.getSymbol(i), i);
+        }
+        List<Map<O, Integer>> result = new ArrayList<>(1);
+        result.add(identity);
         return result;
     }
 
@@ -438,7 +468,8 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         public O getTransitionOutput(List<Pair<D, OutputRow<I, O>>> transition) {
             Set<O> outputs = this.getTransitionOutputSet(transition);
             if (outputs.size() != 1) {
-                throw new IllegalStateException("Output for Mealy machine was not well-defined: " + transition.toString());
+                throw new IllegalStateException(
+                        "Output for Mealy machine was not well-defined: " + transition.toString());
             }
             return outputs.iterator().next();
         }

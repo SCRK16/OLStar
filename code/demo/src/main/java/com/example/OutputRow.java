@@ -23,7 +23,7 @@ public class OutputRow<I, O> {
      */
     private ArrayList<OutputRow<I, O>> successors;
     /**
-     * For every output symbol, the short row this row is equal to.
+     * For every output map, the short row this row is equal to.
      */
     private ArrayList<OutputRow<I, O>> shortRows;
     /** For every input, the output from this row */
@@ -63,6 +63,10 @@ public class OutputRow<I, O> {
 
     public boolean isShortPrefixRow() {
         return this.successors != null;
+    }
+
+    public void resetShortRows() {
+        this.shortRows = new ArrayList<>();
     }
 
     public boolean setShortRow(int outputIndex, OutputRow<I, O> row) {

@@ -134,7 +134,9 @@ public class OutputObservationTable<I, O, D> {
         for (int i = 0; i < this.outputMaps.size(); i++) {
             this.outputContentIds.add(new HashMap<>());
         }
-        this.updateOutputContentIds();
+        for (OutputRow<I, O> row : this.allRows) {
+            row.resetShortRows();
+        }
     }
 
     public List<Map<O, D>> getOutputMaps() {
@@ -154,20 +156,11 @@ public class OutputObservationTable<I, O, D> {
         for (DefaultQuery<I, Word<O>> query : queries) {
             for (O symbol : query.getOutput()) {
                 if (!this.outputAlphabet.containsSymbol(symbol)) {
-                    this.addOutputSymbol(symbol);
+                    this.outputAlphabet.add(symbol);
                 }
             }
         }
         return this.outputAlphabet.size() > outputAlphabetSize;
-    }
-
-    /**
-     * Add the symbol {@code outputSymbol} to the output alphabet and adjust rows
-     * 
-     * @param outputSymbol The output symbol to add
-     */
-    private boolean addOutputSymbol(O outputSymbol) {
-        return this.outputAlphabet.add(outputSymbol);
     }
 
     /**
@@ -326,7 +319,7 @@ public class OutputObservationTable<I, O, D> {
         for (int i = 0; i < this.outputMaps.size(); i++) {
             Map<List<Word<D>>, List<Integer>> iMap = new HashMap<>();
             Map<O, D> outputMap = this.outputMaps.get(i);
-            for(OutputRow<I, O> curRow : this.shortPrefixRows) {
+            for (OutputRow<I, O> curRow : this.shortPrefixRows) {
                 int curRowId = curRow.getRowId();
                 List<Word<O>> curRowContents = this.table.get(curRowId);
                 List<Word<D>> curOutputContents = this.toOutputWords(curRowContents, outputMap);
@@ -379,9 +372,7 @@ public class OutputObservationTable<I, O, D> {
                 return false;
             }
             OutputRow<I, O> shortRow = this.allRows.get(contentId);
-            for (int i = 0; i < this.outputAlphabet.size(); i++) {
-                row.setShortRow(i, shortRow);
-            }
+            row.setShortRow(0, shortRow);
         }
         System.out.println("Regular closed");
         return true;
@@ -390,14 +381,15 @@ public class OutputObservationTable<I, O, D> {
     /**
      * Computes the output-unclosed rows in the table.
      * <p>
-     * For every long prefix row and every output, checks if there is a short prefix
-     * row that gives that output at the same time as the long prefix row.
+     * For every long prefix row and every output map, checks if there is a short
+     * prefix row that is equal to the long prefix row under the projection of
+     * the output map.
      * If there is, then it stores that short prefix row in the long prefix row.
      * If there is not, then the long prefix row is output-unclosed.
      * <p>
      * The output-unclosed rows are added to a list of lists. The rows in each list
-     * all have the same behaviour for some output. Making any one of these rows a
-     * short prefix row will solve the closedness defect.
+     * all have the same behaviour for some output map. Making any one of these rows
+     * a short prefix row will solve the closedness defect.
      * <p>
      * Note that a long prefix row may be in multiple equivalence classes: one for
      * every output symbol in the output alphabet. In this case, adding it to the
@@ -412,7 +404,8 @@ public class OutputObservationTable<I, O, D> {
      *         there are no unclosed rows
      */
     public List<List<OutputRow<I, O>>> findUnclosedRows() {
-        List<Map<List<Word<Boolean>>, Integer>> unclosedIndexes = new ArrayList<>(this.outputAlphabet.size());
+        this.updateOutputContentIds();
+        List<Map<List<Word<Boolean>>, Integer>> unclosedIndexes = new ArrayList<>(this.outputMaps.size());
         List<List<OutputRow<I, O>>> unclosed = new ArrayList<>();
         for (int i = 0; i < this.outputMaps.size(); i++) {
             unclosedIndexes.add(new HashMap<>());
@@ -420,14 +413,14 @@ public class OutputObservationTable<I, O, D> {
                 List<Word<O>> rowContents = this.table.get(row.getRowId());
                 List<Word<D>> outputContents = this.toOutputWords(rowContents, this.outputMaps.get(i));
                 List<Integer> contentIds = this.outputContentIds.get(i).get(outputContents);
-                if (contentIds == null) { // The row is unclosed for this output
+                if (contentIds == null) { // The row is unclosed for this map
                     Integer unclosedIndex = unclosedIndexes.get(i).get(outputContents);
                     if (unclosedIndex == null) { // There is no equivalence class for this row, so add one
                         unclosedIndex = unclosed.size();
                         unclosed.add(new ArrayList<>());
                     }
                     unclosed.get(unclosedIndex).add(row);
-                } else { // The row is closed for this output
+                } else { // The row is closed for this map
                     row.setShortRow(i, this.allRows.get(contentIds.get(0)));
                 }
             }
@@ -436,7 +429,7 @@ public class OutputObservationTable<I, O, D> {
     }
 
     /**
-     * Finds rows that are inconsistent when projected to some output
+     * Finds rows that are inconsistent when projected to some output map
      * Two rows are inconsistent if they are equal, but their successor rows aren't
      *
      * @return A word that would fix an inconsistency, or null if none exist
@@ -474,7 +467,7 @@ public class OutputObservationTable<I, O, D> {
     }
 
     /**
-     * Finds all rows that are inconsistent when projected to some output
+     * Finds all rows that are inconsistent when projected to some output map
      * Two rows are inconsistent if they are equal, but their successor rows aren't
      *
      * @return All words that would fix an inconsistency, or null if none exist

@@ -134,6 +134,10 @@ public class OutputObservationTable<I, O, D> {
         for (int i = 0; i < this.outputMaps.size(); i++) {
             this.outputContentIds.add(new HashMap<>());
         }
+        this.resetAllShortRows();
+    }
+
+    private void resetAllShortRows() {
         for (OutputRow<I, O> row : this.allRows) {
             row.resetShortRows();
         }
@@ -324,7 +328,6 @@ public class OutputObservationTable<I, O, D> {
                 List<Word<O>> curRowContents = this.table.get(curRowId);
                 List<Word<D>> curOutputContents = this.toOutputWords(curRowContents, outputMap);
                 List<Integer> outputIds = iMap.getOrDefault(curOutputContents, new ArrayList<>());
-                iMap.remove(outputIds);
                 outputIds.add(curRowId);
                 iMap.put(curOutputContents, outputIds);
             }
@@ -372,7 +375,9 @@ public class OutputObservationTable<I, O, D> {
                 return false;
             }
             OutputRow<I, O> shortRow = this.allRows.get(contentId);
-            row.setShortRow(0, shortRow);
+            for (int i = 0; i < this.outputMaps.size(); i++) {
+                row.setShortRow(i, shortRow);
+            }
         }
         System.out.println("Regular closed");
         return true;

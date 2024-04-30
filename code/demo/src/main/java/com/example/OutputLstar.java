@@ -469,7 +469,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             Set<O> outputs = this.getTransitionOutputSet(transition);
             if (outputs.size() != 1) {
                 throw new IllegalStateException(
-                        "Output for Mealy machine was not well-defined: " + transition.toString());
+                        "Output for Mealy machine was not well-defined: " + transition.toString() + " / " + outputs.toString());
             }
             return outputs.iterator().next();
         }

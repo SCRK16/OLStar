@@ -176,6 +176,9 @@ public class Main {
             learner = MealyUtil.wrapSymbolLearner(
                     new ClassicLStarMealy<I, O>(inputAlphabet, MealyUtil.wrapWordOracle(mCacheOracle),
                             ObservationTableCEXHandlers.SUFFIX1BY1, ClosingStrategies.CLOSE_FIRST));
+        } else if (algorithm.equals("ILstar") || algorithm.equals("IL*")) {
+            EarlyBreakEQOracle<I, O> earlyBreakOracle = new EarlyBreakEQOracle<>(target, eqOracle);
+            learner = new InputLstar<>(inputAlphabet, mCacheOracle, earlyBreakOracle, AcexAnalyzers.LINEAR_FWD);
         } else {
             throw new UnsupportedOperationException("Valid algorithms: Decompose / TTT / OLstar / Lstar");
         }

@@ -56,13 +56,6 @@
             <artifactId>jakarta.annotation-api</artifactId>
             <version>3.0.0-M1</version>
         </dependency>
-
-        <!--dependency>
-            <groupId>org.testng</groupId>
-            <artifactId>testng</artifactId>
-            <version>7.9.0</version>
-            <scope>test</scope>
-        </dependency-->
     </dependencies>
 </project>
 

@@ -1,5 +1,7 @@
 # VSCode Setup
 .vscode/
+
+# Python virtual environment
 code/python/.venv/
 
 # Compiled class file

@@ -127,7 +127,7 @@ public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
         if (nobreak) {
             return null;
         }
-        List<Integer> result = indexList.subList(0, incrementIndex);
+        List<Integer> result = new ArrayList<>(indexList.subList(0, incrementIndex));
         for (int i = incrementIndex; i < indexList.size(); i++) {
             result.add(current);
             current += 1;
@@ -147,12 +147,21 @@ public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
      * @param indexList List of indices to be excluded
      * @param bound     Upper bound (exclusive) of integers to include
      * @return List of indices smaller than bound, not in indexList
+     * @implSpec Assumes that indexList is sorted from low to high
+     *           and only contains integers >= 0
      */
     private List<Integer> complementList(List<Integer> indexList, int bound) {
         List<Integer> result = new ArrayList<>();
+        int currentIndex = 0;
+        Integer current = indexList.get(0);
         for (int i = 0; i < bound; i++) {
-            if (!indexList.contains(i)) {
+            if (i != current) {
                 result.add(i);
+            } else {
+                currentIndex += 1;
+                if (currentIndex < indexList.size()) {
+                    current = indexList.get(currentIndex);
+                }
             }
         }
         return result;

@@ -13,8 +13,6 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import de.learnlib.acex.AcexAnalyzer;
 import de.learnlib.algorithm.LearningAlgorithm;
 import de.learnlib.algorithm.ttt.mealy.TTTLearnerMealy;
-import de.learnlib.filter.cache.mealy.MealyCaches;
-import de.learnlib.oracle.MembershipOracle;
 import de.learnlib.oracle.MembershipOracle.MealyMembershipOracle;
 import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
 import de.learnlib.query.DefaultQuery;
@@ -36,10 +34,10 @@ public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
     private List<Alphabet<I>> subAlphabets;
     private List<MealyLearner<I, O>> learners;
 
-    public InputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> mqOracle,
+    public InputLstar(Alphabet<I> inputAlphabet, MealyMembershipOracle<I, O> mqOracle,
             MealyEquivalenceOracle<I, O> eqOracle, AcexAnalyzer acexAnalyzer) {
         this.inputAlphabet = inputAlphabet;
-        this.mqOracle = MealyCaches.createTreeCache(inputAlphabet, mqOracle);
+        this.mqOracle = mqOracle;
         this.eqOracle = eqOracle;
         this.acexAnalyzer = acexAnalyzer;
         this.subAlphabets = new ArrayList<>();
@@ -224,6 +222,7 @@ public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
     }
 
     private void learnComponent(int index) {
+        System.out.println("Learning component " + String.valueOf(index) + " with alphabet" + this.subAlphabets.get(index).toString());
         MealyLearner<I, O> learner = this.learners.get(index);
         learner.startLearning();
         while (true) {

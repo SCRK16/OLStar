@@ -172,19 +172,19 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
      */
     private boolean closeTable() {
         boolean refined = false;
+        this.table.setOutputMaps(this.outputMapSupplier.get());
         if (this.table.isRegularClosed()) {
             return false;
         }
-        this.table.setOutputMaps(this.outputMapSupplier.get());
         List<List<OutputRow<I, O>>> unclosed = this.table.findUnclosedRows();
         while (!unclosed.isEmpty()) {
             OutputRow<I, O> newShortRow = this.selectClosingRow(unclosed);
             this.table.makeShort(newShortRow);
             refined = true;
+            this.table.setOutputMaps(this.outputMapSupplier.get());
             if (this.table.isRegularClosed()) {
                 return true;
             }
-            this.table.setOutputMaps(this.outputMapSupplier.get());
             unclosed = this.table.findUnclosedRows();
         }
         if (checkConsistency && useFirstInconsistency) {

@@ -7,12 +7,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Queue;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import de.learnlib.acex.AcexAnalyzer;
 import de.learnlib.algorithm.LearningAlgorithm;
-import de.learnlib.algorithm.ttt.mealy.TTTLearnerMealy;
 import de.learnlib.oracle.MembershipOracle.MealyMembershipOracle;
 import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
 import de.learnlib.query.DefaultQuery;
@@ -29,23 +28,23 @@ public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
     final private Alphabet<I> inputAlphabet;
     final private MealyMembershipOracle<I, O> mqOracle;
     final private MealyEquivalenceOracle<I, O> eqOracle;
-    final private AcexAnalyzer acexAnalyzer;
 
     private List<Alphabet<I>> subAlphabets;
     private List<MealyLearner<I, O>> learners;
+    private Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier;
 
-    public InputLstar(Alphabet<I> inputAlphabet, MealyMembershipOracle<I, O> mqOracle,
-            MealyEquivalenceOracle<I, O> eqOracle, AcexAnalyzer acexAnalyzer) {
+    public InputLstar(Alphabet<I> inputAlphabet, Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier,
+            MealyMembershipOracle<I, O> mqOracle, MealyEquivalenceOracle<I, O> eqOracle) {
         this.inputAlphabet = inputAlphabet;
+        this.learnerSupplier = learnerSupplier;
         this.mqOracle = mqOracle;
         this.eqOracle = eqOracle;
-        this.acexAnalyzer = acexAnalyzer;
         this.subAlphabets = new ArrayList<>();
         this.learners = new ArrayList<>();
         for (I input : this.inputAlphabet) {
             Alphabet<I> singleInputAlphabet = Alphabets.singleton(input);
             this.subAlphabets.add(singleInputAlphabet);
-            this.learners.add(new TTTLearnerMealy<I, O>(singleInputAlphabet, this.mqOracle, this.acexAnalyzer));
+            this.learners.add(this.learnerSupplier.apply(singleInputAlphabet));
         }
     }
 
@@ -70,7 +69,7 @@ public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
         List<Alphabet<I>> currentAlphabetList = this.getAll(this.subAlphabets, alphabetIndexList);
         Alphabet<I> mergedAlphabet = this.mergeAlphabets(currentAlphabetList);
         nextAlphabets.add(mergedAlphabet);
-        TTTLearnerMealy<I, O> mergedLearner = new TTTLearnerMealy<>(mergedAlphabet, this.mqOracle, this.acexAnalyzer);
+        MealyLearner<I, O> mergedLearner = this.learnerSupplier.apply(mergedAlphabet);
         nextLearners.add(mergedLearner);
 
         this.subAlphabets = nextAlphabets;
@@ -222,7 +221,8 @@ public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
     }
 
     private void learnComponent(int index) {
-        System.out.println("Learning component " + String.valueOf(index) + " with alphabet" + this.subAlphabets.get(index).toString());
+        System.out.println("Learning component " + String.valueOf(index) + " with alphabet "
+                + this.subAlphabets.get(index).toString());
         MealyLearner<I, O> learner = this.learners.get(index);
         learner.startLearning();
         while (true) {

@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import de.learnlib.acex.AcexAnalyzers;
@@ -178,7 +179,8 @@ public class Main {
                             ObservationTableCEXHandlers.SUFFIX1BY1, ClosingStrategies.CLOSE_FIRST));
         } else if (algorithm.equals("ILstar") || algorithm.equals("IL*")) {
             EarlyBreakEQOracle<I, O> earlyBreakOracle = new EarlyBreakEQOracle<>(target, eqOracle);
-            learner = new InputLstar<>(inputAlphabet, mCacheOracle, earlyBreakOracle, AcexAnalyzers.LINEAR_FWD);
+            Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new OutputLstar<>(A, mCacheOracle, true, false);
+            learner = new InputLstar<>(inputAlphabet, learnerSupplier, mCacheOracle, earlyBreakOracle);
         } else {
             throw new UnsupportedOperationException("Valid algorithms: Decompose / TTT / OLstar / Lstar");
         }
@@ -237,7 +239,7 @@ public class Main {
              * System.err.println("Usage: ./Main toy <algorithm> OR ./Main _ <algorithm>" OR ./Main all <algorithm>);
              * System.exit(1);
              */
-            args = new String[] { "_", "OL*" };
+            args = new String[] { "_", "IL*" };
         }
         if (args[0].equals("toy")) {
             CompactMealy<Character, Object> target = constructSUL(3);

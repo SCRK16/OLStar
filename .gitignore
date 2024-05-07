@@ -4,6 +4,9 @@
 # Python virtual environment
 code/python/.venv/
 
+# Jupyter notebooks
+*.ipynb
+
 # Compiled class file
 *.class
 

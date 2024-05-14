@@ -12,8 +12,8 @@ import java.util.function.Function;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import de.learnlib.algorithm.LearningAlgorithm;
-import de.learnlib.oracle.MembershipOracle.MealyMembershipOracle;
 import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
+import de.learnlib.oracle.MembershipOracle.MealyMembershipOracle;
 import de.learnlib.query.DefaultQuery;
 import net.automatalib.alphabet.Alphabet;
 import net.automatalib.alphabet.Alphabets;
@@ -23,7 +23,10 @@ import net.automatalib.common.util.Triple;
 import net.automatalib.word.Word;
 import net.automatalib.word.WordBuilder;
 
-public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
+/**
+ * Implementation of the CL* algorithm from Labbaf et al. (2023) - Compositional Learning for Interleaving Parallel Automata
+ */
+public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
 
     final private Alphabet<I> inputAlphabet;
     final private MealyMembershipOracle<I, O> mqOracle;
@@ -33,7 +36,7 @@ public class InputLstar<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
     private List<MealyLearner<I, O>> learners;
     private Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier;
 
-    public InputLstar(Alphabet<I> inputAlphabet, Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier,
+    public InputDecomposer(Alphabet<I> inputAlphabet, Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier,
             MealyMembershipOracle<I, O> mqOracle, MealyEquivalenceOracle<I, O> eqOracle) {
         this.inputAlphabet = inputAlphabet;
         this.learnerSupplier = learnerSupplier;

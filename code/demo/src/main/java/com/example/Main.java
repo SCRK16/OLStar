@@ -180,7 +180,8 @@ public class Main {
         } else if (algorithm.equals("ILstar") || algorithm.equals("IL*")) {
             EarlyBreakEQOracle<I, O> earlyBreakOracle = new EarlyBreakEQOracle<>(target, eqOracle);
             Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new OutputLstar<>(A, mCacheOracle, true, false);
-            learner = new InputLstar<>(inputAlphabet, learnerSupplier, mCacheOracle, earlyBreakOracle);
+            //Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new TTTLearnerMealy<>(A, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
+            learner = new InputDecomposer<>(inputAlphabet, learnerSupplier, mCacheOracle, earlyBreakOracle);
         } else {
             throw new UnsupportedOperationException("Valid algorithms: Decompose / TTT / OLstar / Lstar");
         }
@@ -246,7 +247,7 @@ public class Main {
             learn(target, args[1], false, null, null);
         } else if (args[0].equals("all")) {
             File file = new File("results\\rerun.txt");
-            try (Stream<Path> paths = Files.walk(Paths.get("models"))) {
+            try (Stream<Path> paths = Files.walk(Paths.get("D:\\Models\\Labbaf"))) {
                 for (Path path : paths.filter(Files::isRegularFile).toList()) {
                     CompactMealy<String, String> target = DOTParsers
                             .mealy()

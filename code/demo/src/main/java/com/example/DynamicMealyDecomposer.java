@@ -6,9 +6,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Queue;
 import java.util.Set;
+import java.util.function.Function;
 
-import de.learnlib.acex.AcexAnalyzer;
-import de.learnlib.algorithm.ttt.mealy.TTTLearnerMealy;
 import de.learnlib.filter.cache.mealy.MealyCaches;
 import de.learnlib.oracle.MembershipOracle;
 import de.learnlib.query.DefaultQuery;
@@ -20,34 +19,39 @@ import net.automatalib.word.WordBuilder;
 
 public class DynamicMealyDecomposer<I, O> extends MealyDecomposer<I, O> {
     private final MembershipOracle<I, Word<O>> mqOracle;
-    private final AcexAnalyzer analyzer;
+    private final Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier;
 
-    public DynamicMealyDecomposer(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> mqOracle, AcexAnalyzer analyzer) {
-        this(inputAlphabet, mqOracle, analyzer, new GrowingMapAlphabet<>());
+    public DynamicMealyDecomposer(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> mqOracle,
+            Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier) {
+        this(inputAlphabet, mqOracle, learnerSupplier, new GrowingMapAlphabet<>());
     }
 
     public DynamicMealyDecomposer(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> mqOracle,
-            AcexAnalyzer analyzer, GrowingAlphabet<O> outputAlphabet) {
-        super(inputAlphabet, mqOracle, analyzer, outputAlphabet, false);
+            Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier,
+            GrowingAlphabet<O> outputAlphabet) {
+        super(inputAlphabet, mqOracle, learnerSupplier, outputAlphabet, false);
         this.mqOracle = mqOracle;
-        this.analyzer = analyzer;
+        this.learnerSupplier = learnerSupplier;
     }
 
     public static <I, O> DynamicMealyDecomposer<I, O> createDynamicMealyDecomposerWithCache(Alphabet<I> inputAlphabet,
-            MembershipOracle<I, Word<O>> mqOracle, AcexAnalyzer analyzer, GrowingAlphabet<O> outputAlphabet) {
+            MembershipOracle<I, Word<O>> mqOracle,
+            Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier,
+            GrowingAlphabet<O> outputAlphabet) {
         MembershipOracle<I, Word<O>> cacheOracle = MealyCaches.createCache(inputAlphabet, mqOracle);
-        return new DynamicMealyDecomposer<>(inputAlphabet, cacheOracle, analyzer, outputAlphabet);
+        return new DynamicMealyDecomposer<>(inputAlphabet, cacheOracle, learnerSupplier, outputAlphabet);
     }
 
     public static <I, O> DynamicMealyDecomposer<I, O> createDynamicMealyDecomposerWithCache(Alphabet<I> inputAlphabet,
-            MembershipOracle<I, Word<O>> mqOracle, AcexAnalyzer analyzer) {
+            MembershipOracle<I, Word<O>> mqOracle,
+            Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier) {
         MembershipOracle<I, Word<O>> cacheOracle = MealyCaches.createCache(inputAlphabet, mqOracle);
-        return new DynamicMealyDecomposer<>(inputAlphabet, cacheOracle, analyzer);
+        return new DynamicMealyDecomposer<>(inputAlphabet, cacheOracle, learnerSupplier);
     }
 
     @Override
     public void startLearning() {
-        for(MealyLearner<I, Boolean> learner : learners) {
+        for (MealyLearner<I, Boolean> learner : learners) {
             learner.startLearning();
         }
         this.fixReachableDefects();
@@ -60,29 +64,28 @@ public class DynamicMealyDecomposer<I, O> extends MealyDecomposer<I, O> {
 
     public boolean refineHypothesis(DefaultQuery<I, Word<O>> ce, boolean fixDefects) {
         boolean refined = false;
-        for(O o : ce.getOutput()) {
-            if(!this.outputAlphabet.contains(o)) {
-                TTTLearnerMealy<I, Boolean> learner = new TTTLearnerMealy<>(this.getInputAlphabet(),
-                    new OutputOracle(this.mqOracle, o), this.analyzer);
+        for (O o : ce.getOutput()) {
+            if (!this.outputAlphabet.contains(o)) {
+                MealyLearner<I, Boolean> learner = this.learnerSupplier.apply(new OutputOracle(this.mqOracle, o));
                 learner.startLearning();
                 this.learners.add(learner);
                 this.outputAlphabet.add(o);
                 refined = true;
             }
         }
-        for(int i = 0; i < this.learners.size(); i++) {
+        for (int i = 0; i < this.learners.size(); i++) {
             WordBuilder<Boolean> wb = new WordBuilder<>();
-            for(O o : ce.getOutput()) {
+            for (O o : ce.getOutput()) {
                 wb.add(this.outputAlphabet.getSymbol(i).equals(o));
             }
             DefaultQuery<I, Word<Boolean>> query = new DefaultQuery<I, Word<Boolean>>(
-                ce.getPrefix(),
-                ce.getSuffix(),
-                wb.toWord());
+                    ce.getPrefix(),
+                    ce.getSuffix(),
+                    wb.toWord());
             boolean r = this.learners.get(i).refineHypothesis(query);
             refined |= r;
         }
-        if(fixDefects && refined) {
+        if (fixDefects && refined) {
             fixReachableDefects();
         }
         return refined;
@@ -91,11 +94,15 @@ public class DynamicMealyDecomposer<I, O> extends MealyDecomposer<I, O> {
     @SuppressWarnings("unchecked")
     private DefaultQuery<I, Word<O>> findReachableDefect() {
         /*
-         * We try to find a defect without doing equivalence queries by doing a reachability analysis.
-         * For each transitions, there must be exactly one component machine that outputs true.
-         * If there are 0 or >= 2, then there is at least one component for which we have found a counterexample.
+         * We try to find a defect without doing equivalence queries by doing a
+         * reachability analysis.
+         * For each transitions, there must be exactly one component machine that
+         * outputs true.
+         * If there are 0 or >= 2, then there is at least one component for which we
+         * have found a counterexample.
          */
-        RecomposedMealyMachine<Object, Object> hypothesis = (RecomposedMealyMachine<Object, Object>) this.getHypothesisModel();
+        RecomposedMealyMachine<Object, Object> hypothesis = (RecomposedMealyMachine<Object, Object>) this
+                .getHypothesisModel();
 
         Set<List<Object>> reach = new HashSet<>();
         Queue<List<Object>> bfsQueue = new ArrayDeque<>();
@@ -106,7 +113,8 @@ public class DynamicMealyDecomposer<I, O> extends MealyDecomposer<I, O> {
         List<Object> curr;
         while ((curr = bfsQueue.poll()) != null) {
             WordBuilder<I> wb = accessSequences.poll();
-            if(reach.contains(curr)) continue;
+            if (reach.contains(curr))
+                continue;
 
             for (I in : this.getInputAlphabet()) {
                 WordBuilder<I> wbin = new WordBuilder<>(wb.toWord());
@@ -114,14 +122,15 @@ public class DynamicMealyDecomposer<I, O> extends MealyDecomposer<I, O> {
                 List<Object> transition = hypothesis.getTransition(curr, in);
                 List<Boolean> outputs = hypothesis.getComponentOutputs(transition);
                 long trueCount = Collections.frequency(outputs, true);
-                if(trueCount != 1) {// We have found a defect
+                if (trueCount != 1) {// We have found a defect
                     Word<I> w = wbin.toWord();
                     DefaultQuery<I, Word<O>> ce = new DefaultQuery<>(w);
                     ce.answer(this.mqOracle.answerQuery(w));
                     return ce;
                 }
                 List<Object> succ = hypothesis.getSuccessor(transition);
-                if (succ == null) continue;
+                if (succ == null)
+                    continue;
 
                 if (!reach.contains(succ)) {
                     bfsQueue.add(succ);
@@ -135,7 +144,7 @@ public class DynamicMealyDecomposer<I, O> extends MealyDecomposer<I, O> {
 
     private <S, T> void fixReachableDefects() {
         DefaultQuery<I, Word<O>> ce = this.findReachableDefect();
-        while(ce != null) {
+        while (ce != null) {
             this.refineHypothesis(ce, false);
             ce = this.findReachableDefect();
         }

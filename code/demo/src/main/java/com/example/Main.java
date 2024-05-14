@@ -27,6 +27,7 @@ import de.learnlib.algorithm.ttt.mealy.TTTLearnerMealy;
 import de.learnlib.oracle.membership.MealySimulatorOracle;
 import de.learnlib.query.DefaultQuery;
 import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
+import de.learnlib.oracle.MembershipOracle;
 import de.learnlib.oracle.equivalence.MealyRandomWpMethodEQOracle;
 import de.learnlib.filter.cache.mealy.MealyCacheOracle;
 import de.learnlib.filter.cache.mealy.MealyCaches;
@@ -98,6 +99,13 @@ public class Main {
                 .create();
     }
 
+    public static <I, O> MealyLearner<I, O> wrappedClassicLstarMealy(Alphabet<I> inputAlphabet,
+            MembershipOracle<I, Word<O>> mqOracle) {
+        return MealyUtil.wrapSymbolLearner(
+                new ClassicLStarMealy<I, O>(inputAlphabet, MealyUtil.wrapWordOracle(mqOracle),
+                        ObservationTableCEXHandlers.SUFFIX1BY1, ClosingStrategies.CLOSE_FIRST));
+    }
+
     /**
      * Main loop of active automata learning.
      *
@@ -167,20 +175,22 @@ public class Main {
         MealyRandomWpMethodEQOracle<I, O> eqOracle = new MealyRandomWpMethodEQOracle<>(testingCacheOracle, 2, 10);
         MealyLearner<I, O> learner;
         if (algorithm.equals("Decompose")) {
+            Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier = MQOracle -> wrappedClassicLstarMealy(
+                    inputAlphabet, MQOracle);
             learner = DynamicMealyDecomposer.createDynamicMealyDecomposerWithCache(inputAlphabet, mOracleForLearning,
-                    AcexAnalyzers.LINEAR_FWD);
+                    learnerSupplier);
         } else if (algorithm.equals("TTT")) {
             learner = new TTTLearnerMealy<>(inputAlphabet, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
         } else if (algorithm.equals("OLstar") || algorithm.equals("OL*")) {
             learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true, false);
         } else if (algorithm.equals("Lstar") || algorithm.equals("L*")) {
-            learner = MealyUtil.wrapSymbolLearner(
-                    new ClassicLStarMealy<I, O>(inputAlphabet, MealyUtil.wrapWordOracle(mCacheOracle),
-                            ObservationTableCEXHandlers.SUFFIX1BY1, ClosingStrategies.CLOSE_FIRST));
+            learner = wrappedClassicLstarMealy(inputAlphabet, mCacheOracle);
         } else if (algorithm.equals("ILstar") || algorithm.equals("IL*")) {
             EarlyBreakEQOracle<I, O> earlyBreakOracle = new EarlyBreakEQOracle<>(target, eqOracle);
-            Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new OutputLstar<>(A, mCacheOracle, true, false);
-            //Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new TTTLearnerMealy<>(A, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
+            Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new OutputLstar<>(A, mCacheOracle, true,
+                    false);
+            // Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new
+            // TTTLearnerMealy<>(A, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
             learner = new InputDecomposer<>(inputAlphabet, learnerSupplier, mCacheOracle, earlyBreakOracle);
         } else {
             throw new UnsupportedOperationException("Valid algorithms: Decompose / TTT / OLstar / Lstar");
@@ -237,7 +247,8 @@ public class Main {
     public static void main(String[] args) throws IOException {
         if (args.length < 2) {
             /*
-             * System.err.println("Usage: ./Main toy <algorithm> OR ./Main _ <algorithm>" OR ./Main all <algorithm>);
+             * System.err.println("Usage: ./Main toy <algorithm> OR ./Main _ <algorithm>" OR
+             * ./Main all <algorithm>);
              * System.exit(1);
              */
             args = new String[] { "_", "IL*" };
@@ -247,7 +258,7 @@ public class Main {
             learn(target, args[1], false, null, null);
         } else if (args[0].equals("all")) {
             File file = new File("results\\rerun.txt");
-            try (Stream<Path> paths = Files.walk(Paths.get("D:\\Models\\Labbaf"))) {
+            try (Stream<Path> paths = Files.walk(Paths.get("models"))) {
                 for (Path path : paths.filter(Files::isRegularFile).toList()) {
                     CompactMealy<String, String> target = DOTParsers
                             .mealy()

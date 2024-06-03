@@ -1,9 +1,12 @@
 package com.example;
 
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
 import java.util.function.Supplier;
 
 public class OutputMapSuppliers {
@@ -202,5 +205,24 @@ public class OutputMapSuppliers {
             return OutputMapSuppliers::artificial5maps;
         }
         throw new IllegalArgumentException("Illegal model for artificialMaps");
+    }
+
+    public static Supplier<List<Map<String, Integer>>> fromFile(File file) throws FileNotFoundException {
+        Scanner scanner = new Scanner(file);
+        List<String[]> lines = new ArrayList<>();
+        while (scanner.hasNextLine()) {
+            lines.add(scanner.nextLine().split(" "));
+        }
+        scanner.close();
+        int count = lines.get(0).length;
+        List<Map<String, Integer>> result = new ArrayList<>();
+        for (int i = 1; i < count; i++) {
+            Map<String, Integer> map = new HashMap<>();
+            for (String[] line : lines) {
+                map.put(line[0], Integer.parseInt(line[i]));
+            }
+            result.add(map);
+        }
+        return () -> result;
     }
 }

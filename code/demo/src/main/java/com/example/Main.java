@@ -18,7 +18,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import de.learnlib.acex.AcexAnalyzers;
@@ -153,19 +156,22 @@ public class Main {
     /**
      * Learns the target using the specified algorithm
      *
-     * @param <I>       The input alphabet type of the target
-     * @param <O>       The output alphabet type of the target
-     * @param target    The target to be learned
-     * @param algorithm The name of the algorithm to be used
-     * @param visualize Set to true to visualize the results (works poorly when
-     *                  target has many states)
-     * @param file      The file to store the results in, set to null if results
-     *                  should not be stored
-     * @param name      The name of the file to store the results in
+     * @param <I>               The input alphabet type of the target
+     * @param <O>               The output alphabet type of the target
+     * @param target            The target to be learned
+     * @param algorithm         The name of the algorithm to be used
+     * @param visualize         Set to true to visualize the results (works poorly
+     *                          when target has many states)
+     * @param file              The file to store the results in, set to null if
+     *                          results should not be stored
+     * @param name              The name of the file to store the results in
+     * @param outputMapSupplier The supplier of the output map for OL*. If null, use
+     *                          the single output map. Unused for other learning
+     *                          algorithms
      * @throws IOException
      */
     public static <I, O> void learn(CompactMealy<I, O> target, String algorithm, boolean visualize, File file,
-            String name) throws IOException {
+            String name, Supplier<List<Map<O, Integer>>> outputMapSupplier) throws IOException {
         Alphabet<I> inputAlphabet = target.getInputAlphabet();
         MealySimulatorOracle<I, O> mOracle = new MealySimulatorOracle<>(target);
         MealyCounterOracle<I, O> mOracleForLearning = new MealyCounterOracle<>(mOracle);
@@ -182,13 +188,13 @@ public class Main {
         } else if (algorithm.equals("TTT")) {
             learner = new TTTLearnerMealy<>(inputAlphabet, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
         } else if (algorithm.equals("OLstar") || algorithm.equals("OL*")) {
-            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true, false);
+            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true, false, outputMapSupplier);
         } else if (algorithm.equals("Lstar") || algorithm.equals("L*")) {
             learner = wrappedClassicLstarMealy(inputAlphabet, mCacheOracle);
         } else if (algorithm.equals("ILstar") || algorithm.equals("IL*")) {
             EarlyBreakEQOracle<I, O> earlyBreakOracle = new EarlyBreakEQOracle<>(target, eqOracle);
             Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new OutputLstar<>(A, mCacheOracle, true,
-                    false);
+                    false, null);
             // Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new
             // TTTLearnerMealy<>(A, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
             learner = new InputDecomposer<>(inputAlphabet, learnerSupplier, mCacheOracle, earlyBreakOracle);
@@ -251,29 +257,30 @@ public class Main {
              * ./Main all <algorithm>);
              * System.exit(1);
              */
-            args = new String[] { "_", "IL*" };
+            args = new String[] { "_", "L*" };
         }
         if (args[0].equals("toy")) {
             CompactMealy<Character, Object> target = constructSUL(3);
-            learn(target, args[1], false, null, null);
+            learn(target, args[1], false, null, null, null);
         } else if (args[0].equals("all")) {
-            File file = new File("results\\rerun.txt");
-            try (Stream<Path> paths = Files.walk(Paths.get("models"))) {
+            File file = new File("results\\artificial_olstar_one_output_implied.txt");
+            try (Stream<Path> paths = Files.walk(Paths.get("D:\\Models\\Artificial"))) {
                 for (Path path : paths.filter(Files::isRegularFile).toList()) {
                     CompactMealy<String, String> target = DOTParsers
                             .mealy()
                             .readModel(path.toFile()).model;
-                    learn(target, args[1], false, file, path.toString());
+                    learn(target, args[1], false, file, path.toString(), null);
                 }
             }
         } else {
             if (args[0].equals("_")) {
-                args[0] = "models\\random-2-5-1.dot";
+                args[0] = "models\\random-3-5-1.dot";
             }
             CompactMealy<String, String> target = DOTParsers
                     .mealy()
                     .readModel(new File(args[0])).model;
-            learn(target, args[1], false, null, null);
+            Supplier<List<Map<String, Integer>>> outputMap = OutputMapSuppliers.artificialMaps(args[0]);
+            learn(target, args[1], false, null, null, outputMap);
         }
     }
 }

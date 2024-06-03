@@ -4,7 +4,7 @@ def read_olstar(filename):
     with open(filename) as f:
         data = [s.split("\n") for s in f.read().split("\n\n")]
     for model in data:
-        if(len(model) < 10):
+        if len(model) < 10:
             continue
         for i in range(11):
             model[i] = model[i].split(": ")[-1]
@@ -14,11 +14,23 @@ def read_lstar(filename):
     with open(filename) as f:
         data = [s.split("\n") for s in f.read().split("\n\n")]
     for model in data:
-        if(len(model) < 6):
+        if len(model) < 6:
             continue
         for i in range(7):
             model[i] = model[i].split(": ")[-1]
     return data
+
+def read_decompose(filename):
+    with open(filename) as f:
+        data = [s.split("\n") for s in f.read().split("\n\n")]
+    for model in data:
+        if len(model) < 8:
+            continue
+        for i in range(8):
+            model[i] = model[i].split(": ")[-1]
+        del model[3]
+    return data
+
 
 def remove_filepath(raw_data):
     data = raw_data.split("\n")
@@ -32,13 +44,15 @@ def remove_filepath(raw_data):
 
 def extract_artificial_model_name(data):
     for i in range(len(data)):
-        data[i][0] = data[i][0].split("\\")[-1][:-4]
+        data[i][0] = data[i][0].split("\\")[-1]
 
 def add_header_olstar(data):
-    data.extendleft(["Model","Stages","States","Short rows","Inconsistent count","Zero outputs count","Two outputs count","Learning queries","Learning symbols","Testing queries","Testing symbols"])
+    header = ["Model","Stages","States","Short rows","Inconsistent count","Zero outputs count","Two outputs count","Learning queries","Learning symbols","Testing queries","Testing symbols"]
+    data.insert(0, header)
 
 def add_header_lstar(data):
-    data.extendleft(["Model","Stages","States","Learning queries","Learning symbols","Testing queries","Testing symbols"])
+    header = ["Model","Stages","States","Learning queries","Learning symbols","Testing queries","Testing symbols"]
+    data.insert(0, header)
 
 def write_to_csv(data, filename):
     with open(filename, 'w', newline='') as f:
@@ -59,11 +73,14 @@ def total_symbols_lstar(data):
 
 def main():
     #data_olstar = read_olstar("D:\\Data\\results_labbaf_olstar_random.txt")
-    data_lstar = read_lstar("D:\\Data\\results_artificial_ilstar_olstar.txt")
+    data_lstar = read_lstar("D:\\Data\\results_labbaf_ttt.txt")
     extract_artificial_model_name(data_lstar)
+    data_lstar = data_lstar[:-1]
+    data_lstar = sorted(data_lstar)
+    add_header_lstar(data_lstar)
 
     #write_to_csv(list(sorted(data_olstar)), "D:\\Data\\results_labbaf_olstar_random.csv")
-    write_to_csv(list(sorted(data_lstar)), "D:\\Data\\results_artificial_ilstar_olstar.csv")
+    write_to_csv(data_lstar, "D:\\Data\\results_labbaf_ttt.csv")
 
 if __name__ == "__main__":
     main()

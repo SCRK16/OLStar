@@ -51,13 +51,17 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
      *                              the most inconsistencies at the same time
      */
     public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle,
-            boolean checkConsistency, boolean useFirstInconsistency) {
+            boolean checkConsistency, boolean useFirstInconsistency, Supplier<List<Map<O, Integer>>> outputMapSupplier) {
         this.inputAlphabet = inputAlphabet;
         this.mqOracle = membershipOracle;
         this.checkConsistency = checkConsistency;
         this.useFirstInconsistency = useFirstInconsistency;
         this.table = new OutputObservationTable<>(inputAlphabet, membershipOracle);
-        this.outputMapSupplier = this::singleOutputMap;
+        if (outputMapSupplier != null) {
+            this.outputMapSupplier = outputMapSupplier;
+        } else {
+            this.outputMapSupplier = this::singleOutputMap;
+        }
     }
 
     @Override
@@ -104,8 +108,13 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
      */
     private boolean isCounterexample(DefaultQuery<I, Word<O>> ce) {
         MealyMachine<?, I, ?, O> hypothesis = this.getHypothesisModel();
-        Word<O> output = hypothesis.computeSuffixOutput(ce.getPrefix(), ce.getSuffix());
-        return !output.equals(ce.getOutput());
+        Word<O> output = null;
+        try {
+            output = hypothesis.computeSuffixOutput(ce.getPrefix(), ce.getSuffix());
+        } catch (IllegalStateException e) {
+            return false;
+        }
+        return !ce.getOutput().equals(output);
     }
 
     /**
@@ -246,7 +255,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
                 List<Pair<Integer, OutputRow<I, O>>> transition = hypothesis.getTransition(curr, in);
                 Set<O> outputs = hypothesis.getTransitionOutputSet(transition);
                 if (outputs.size() != 1) {// We have found a defect
-                    if (outputs.size() == 1) {
+                    if (outputs.size() == 0) {
                         this.zeroOutputsCount += 1;
                     } else {
                         this.twoOutputsCount += 1;
@@ -319,7 +328,12 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     private List<Map<O, Integer>> singleOutputMap() {
         List<Map<O, Integer>> result = new ArrayList<>();
         GrowingAlphabet<O> outputAlphabet = this.table.getOutputAlphabet();
+        boolean first = true;
         for (O o : outputAlphabet) {
+            if (first) {
+                first = false;
+                continue;
+            }
             HashMap<O, Integer> oMap = new HashMap<>();
             oMap.put(o, 1);
             for (O c : outputAlphabet) {

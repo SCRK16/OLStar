@@ -4,6 +4,9 @@
 # Python virtual environment
 code/python/.venv/
 
+# Decompositions
+decompositions/
+
 # Jupyter notebooks
 *.ipynb
 

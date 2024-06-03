@@ -1,11 +1,13 @@
 # VSCode Setup
 .vscode/
 
-# Python virtual environment
+# Python
 code/python/.venv/
+code/python/decompose_fsm.py
 
-# Decompositions
+# Data
 decompositions/
+results/
 
 # Jupyter notebooks
 *.ipynb

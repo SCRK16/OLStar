@@ -3,6 +3,7 @@ package com.example;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Queue;
@@ -16,9 +17,9 @@ import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
 import de.learnlib.oracle.MembershipOracle.MealyMembershipOracle;
 import de.learnlib.query.DefaultQuery;
 import net.automatalib.alphabet.Alphabet;
-import net.automatalib.alphabet.Alphabets;
+import net.automatalib.alphabet.GrowingMapAlphabet;
+import net.automatalib.alphabet.SupportsGrowingAlphabet;
 import net.automatalib.automaton.transducer.MealyMachine;
-import net.automatalib.common.util.Pair;
 import net.automatalib.common.util.Triple;
 import net.automatalib.word.Word;
 import net.automatalib.word.WordBuilder;
@@ -32,7 +33,7 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
     final private MealyMembershipOracle<I, O> mqOracle;
     final private MealyEquivalenceOracle<I, O> eqOracle;
 
-    private List<Alphabet<I>> subAlphabets;
+    private List<GrowingMapAlphabet<I>> subAlphabets;
     private List<MealyLearner<I, O>> learners;
     private Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier;
 
@@ -45,7 +46,7 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
         this.subAlphabets = new ArrayList<>();
         this.learners = new ArrayList<>();
         for (I input : this.inputAlphabet) {
-            Alphabet<I> singleInputAlphabet = Alphabets.singleton(input);
+            GrowingMapAlphabet<I> singleInputAlphabet = new GrowingMapAlphabet<I>(Collections.singleton(input));
             this.subAlphabets.add(singleInputAlphabet);
             this.learners.add(this.learnerSupplier.apply(singleInputAlphabet));
         }
@@ -59,44 +60,103 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
                 inputAlphabet);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public boolean refineHypothesis(DefaultQuery<I, Word<O>> ce) {
-        Pair<DefaultQuery<I, Word<O>>, List<Integer>> analyzed = this.analyzeCounterexample(ce);
-        ce = analyzed.getFirst();
-        List<Integer> alphabetIndexList = analyzed.getSecond();
+        List<List<Integer>> analyzed = this.analyzeCounterexample(ce);
+        List<Set<Integer>> overlaps = this.computeOverlap(analyzed);
         // Collect learners not involved in counterexample
-        List<Integer> complementIndexList = this.complementList(alphabetIndexList, this.subAlphabets.size());
-        List<Alphabet<I>> nextAlphabets = this.getAll(this.subAlphabets, complementIndexList);
+        Set<Integer> allIndices = this.union(overlaps);
+        List<Integer> complementIndexList = this.complementList(allIndices, this.subAlphabets.size());
+        List<GrowingMapAlphabet<I>> nextAlphabets = this.getAll(this.subAlphabets, complementIndexList);
         List<MealyLearner<I, O>> nextLearners = this.getAll(this.learners, complementIndexList);
-        // Merge alphabets, create new learner
-        List<Alphabet<I>> currentAlphabetList = this.getAll(this.subAlphabets, alphabetIndexList);
-        Alphabet<I> mergedAlphabet = this.mergeAlphabets(currentAlphabetList);
-        nextAlphabets.add(mergedAlphabet);
-        MealyLearner<I, O> mergedLearner = this.learnerSupplier.apply(mergedAlphabet);
-        nextLearners.add(mergedLearner);
-
+        int retained = nextLearners.size();
+        for (Set<Integer> alphabetIndices : overlaps) {
+            // Merge alphabets, create new learner
+            List<GrowingMapAlphabet<I>> currentAlphabetList = this.getAll(this.subAlphabets, alphabetIndices);
+            GrowingMapAlphabet<I> mergedAlphabet = this.mergeAlphabets(currentAlphabetList);
+            nextAlphabets.add(mergedAlphabet);
+            List<Integer> alphabetIndexList = new ArrayList<>(alphabetIndices);
+            MealyLearner<I, O> firstLearner = this.learners.get(alphabetIndexList.get(0));
+            if (firstLearner instanceof SupportsGrowingAlphabet) {
+                for (I input : mergedAlphabet) {
+                    ((SupportsGrowingAlphabet<I>) firstLearner).addAlphabetSymbol(input);
+                }
+                nextLearners.add(firstLearner);
+            } else {
+                MealyLearner<I, O> mergedLearner = this.learnerSupplier.apply(mergedAlphabet);
+                mergedLearner.startLearning();
+                nextLearners.add(mergedLearner);
+            }
+        }
         this.subAlphabets = nextAlphabets;
         this.learners = nextLearners;
-
-        this.learnComponent(this.learners.size() - 1);
+        for (int i = retained; i < this.learners.size(); i++) {
+            this.learnComponent(i);
+        }
         return true;
     }
 
-    private Pair<DefaultQuery<I, Word<O>>, List<Integer>> analyzeCounterexample(DefaultQuery<I, Word<O>> ce) {
+    private<T> Set<T> union(List<Set<T>> sets) {
+        Set<T> result = new HashSet<>();
+        for (Set<T> current : sets) {
+            result.addAll(current);
+        }
+        return result;
+    }
+
+    private List<Set<Integer>> computeOverlap(List<List<Integer>> initial) {
+        List<Set<Integer>> currentSets = new ArrayList<>();
+        for (List<Integer> current : initial) {
+            currentSets.add(new HashSet<>(current));
+        }
+        boolean modified = true;
+        while (modified) {
+            modified = false;
+            List<Set<Integer>> nextSets = new ArrayList<>();
+            for (Set<Integer> current : currentSets) {
+                if (nextSets.isEmpty()) {
+                    nextSets.add(current);
+                } else {
+                    for (Set<Integer> poss : nextSets) {
+                        if (intersects(current, poss)) {
+                            poss.addAll(current);
+                            modified = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            currentSets = nextSets;
+        }
+        return currentSets;
+    }
+
+    private<T> boolean intersects(Set<T> current, Set<T> poss) {
+        Set<T> temp = new HashSet<T>(poss);
+        temp.retainAll(current);
+        return !temp.isEmpty();
+    }
+
+    private List<List<Integer>> analyzeCounterexample(DefaultQuery<I, Word<O>> ce) {
         MealyMachine<?, I, ?, O> hypothesis = this.getHypothesisModel();
-        ce = this.shortestPrefixCounterexample(ce);
+        //ce = this.shortestPrefixCounterexample(ce);
         List<Integer> alphabetIndexList = this.involvedAlphabets(ce);
         for (int k = 2; k <= alphabetIndexList.size(); k++) {
+            List<List<Integer>> result = new ArrayList<>();
             List<Integer> indexList = this.firstCombination(k);
             while (indexList != null) {
                 List<Integer> currentAlphabetIndexList = this.getAll(alphabetIndexList, indexList);
-                List<Alphabet<I>> currentAlphabetList = this.getAll(this.subAlphabets, currentAlphabetIndexList);
+                List<GrowingMapAlphabet<I>> currentAlphabetList = this.getAll(this.subAlphabets, currentAlphabetIndexList);
                 Alphabet<I> currentAlphabet = this.mergeAlphabets(currentAlphabetList);
                 DefaultQuery<I, Word<O>> projectedQuery = this.projectQuery(ce, currentAlphabet);
                 if (!projectedQuery.getOutput().equals(hypothesis.computeOutput(projectedQuery.getInput()))) {
-                    return Pair.of(projectedQuery, currentAlphabetIndexList);
+                    result.add(currentAlphabetIndexList);
                 }
                 indexList = this.nextCombination(indexList, alphabetIndexList.size() - 1);
+            }
+            if (!result.isEmpty()) {
+                return result;
             }
         }
         throw new IllegalStateException("Given input was not a counterexample");
@@ -135,7 +195,7 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
         return result;
     }
 
-    private <T> List<T> getAll(List<T> items, List<Integer> indexList) {
+    private <T> List<T> getAll(List<T> items, Iterable<Integer> indexList) {
         List<T> result = new ArrayList<>();
         for (Integer i : indexList) {
             result.add(items.get(i));
@@ -144,24 +204,15 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
     }
 
     /**
-     * @param indexList List of indices to be excluded
+     * @param indices Set of indices to be excluded
      * @param bound     Upper bound (exclusive) of integers to include
-     * @return List of indices smaller than bound, not in indexList
-     * @implSpec Assumes that indexList is sorted from low to high
-     *           and only contains integers >= 0
+     * @return List of indices smaller than bound, not in indices
      */
-    private List<Integer> complementList(List<Integer> indexList, int bound) {
+    private List<Integer> complementList(Set<Integer> indices, int bound) {
         List<Integer> result = new ArrayList<>();
-        int currentIndex = 0;
-        Integer current = indexList.get(0);
         for (int i = 0; i < bound; i++) {
-            if (i != current) {
+            if (!indices.contains(i)) {
                 result.add(i);
-            } else {
-                currentIndex += 1;
-                if (currentIndex < indexList.size()) {
-                    current = indexList.get(currentIndex);
-                }
             }
         }
         return result;
@@ -180,12 +231,12 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
         return result;
     }
 
-    private Alphabet<I> mergeAlphabets(List<Alphabet<I>> alphabets) {
+    private GrowingMapAlphabet<I> mergeAlphabets(List<GrowingMapAlphabet<I>> currentAlphabetList) {
         List<I> inputs = new ArrayList<>();
-        for (Alphabet<I> alphabet : alphabets) {
+        for (Alphabet<I> alphabet : currentAlphabetList) {
             inputs.addAll(alphabet);
         }
-        return Alphabets.fromList(inputs);
+        return new GrowingMapAlphabet<I>(inputs);
     }
 
     private List<Integer> involvedAlphabets(DefaultQuery<I, Word<O>> ce) {
@@ -202,6 +253,7 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
         return involvedIndexList;
     }
 
+    @SuppressWarnings("unused")
     private DefaultQuery<I, Word<O>> shortestPrefixCounterexample(DefaultQuery<I, Word<O>> ce) {
         MealyMachine<?, I, ?, O> hypothesis = this.getHypothesisModel();
         Word<I> input = ce.getInput();
@@ -219,6 +271,7 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
     @Override
     public void startLearning() {
         for (int i = 0; i < this.learners.size(); i++) {
+            this.learners.get(i).startLearning();
             this.learnComponent(i);
         }
     }
@@ -227,7 +280,6 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
         System.out.println("Learning component " + String.valueOf(index) + " with alphabet "
                 + this.subAlphabets.get(index).toString());
         MealyLearner<I, O> learner = this.learners.get(index);
-        learner.startLearning();
         while (true) {
             MealyMachine<?, I, ?, O> hypothesis = learner.getHypothesisModel();
             DefaultQuery<I, Word<O>> ce = this.eqOracle.findCounterExample(hypothesis, this.subAlphabets.get(index));
@@ -241,12 +293,12 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
     public class ParallelInterleavingMachine<S, T> implements MealyMachine<List<S>, I, Triple<List<S>, Integer, T>, O> {
 
         private List<MealyMachine<S, I, T, O>> components;
-        private List<Alphabet<I>> subAlphabets;
+        private List<GrowingMapAlphabet<I>> subAlphabets;
         private Alphabet<I> inputAlphabet;
         private Collection<List<S>> cachedStates;
 
         public ParallelInterleavingMachine(List<MealyMachine<S, I, T, O>> components,
-                List<Alphabet<I>> subAlphabets, Alphabet<I> inputAlphabet) {
+                List<GrowingMapAlphabet<I>> subAlphabets, Alphabet<I> inputAlphabet) {
             this.components = components;
             this.subAlphabets = subAlphabets;
             this.inputAlphabet = inputAlphabet;

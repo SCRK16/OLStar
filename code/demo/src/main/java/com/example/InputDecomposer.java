@@ -1,0 +1,380 @@
+package com.example;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Queue;
+import java.util.Set;
+import java.util.function.Function;
+
+import org.checkerframework.checker.nullness.qual.Nullable;
+
+import de.learnlib.algorithm.LearningAlgorithm;
+import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
+import de.learnlib.oracle.MembershipOracle.MealyMembershipOracle;
+import de.learnlib.query.DefaultQuery;
+import net.automatalib.alphabet.Alphabet;
+import net.automatalib.alphabet.GrowingMapAlphabet;
+import net.automatalib.alphabet.SupportsGrowingAlphabet;
+import net.automatalib.automaton.transducer.MealyMachine;
+import net.automatalib.common.util.Triple;
+import net.automatalib.word.Word;
+import net.automatalib.word.WordBuilder;
+
+/**
+ * Implementation of the CL* algorithm from Labbaf et al. (2023) - Compositional Learning for Interleaving Parallel Automata
+ */
+public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
+
+    final private Alphabet<I> inputAlphabet;
+    final private MealyMembershipOracle<I, O> mqOracle;
+    final private MealyEquivalenceOracle<I, O> eqOracle;
+
+    private List<GrowingMapAlphabet<I>> subAlphabets;
+    private List<MealyLearner<I, O>> learners;
+    private Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier;
+
+    public InputDecomposer(Alphabet<I> inputAlphabet, Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier,
+            MealyMembershipOracle<I, O> mqOracle, MealyEquivalenceOracle<I, O> eqOracle) {
+        this.inputAlphabet = inputAlphabet;
+        this.learnerSupplier = learnerSupplier;
+        this.mqOracle = mqOracle;
+        this.eqOracle = eqOracle;
+        this.subAlphabets = new ArrayList<>();
+        this.learners = new ArrayList<>();
+        for (I input : this.inputAlphabet) {
+            GrowingMapAlphabet<I> singleInputAlphabet = new GrowingMapAlphabet<I>(Collections.singleton(input));
+            this.subAlphabets.add(singleInputAlphabet);
+            this.learners.add(this.learnerSupplier.apply(singleInputAlphabet));
+        }
+    }
+
+    @Override
+    public MealyMachine<?, I, ?, O> getHypothesisModel() {
+        return new ParallelInterleavingMachine<>(
+                this.learners.stream().map(MealyLearner::getHypothesisModel).toList(),
+                subAlphabets,
+                inputAlphabet);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public boolean refineHypothesis(DefaultQuery<I, Word<O>> ce) {
+        List<List<Integer>> analyzed = this.analyzeCounterexample(ce);
+        List<Set<Integer>> overlaps = this.computeOverlap(analyzed);
+        // Collect learners not involved in counterexample
+        Set<Integer> allIndices = this.union(overlaps);
+        List<Integer> complementIndexList = this.complementList(allIndices, this.subAlphabets.size());
+        List<GrowingMapAlphabet<I>> nextAlphabets = this.getAll(this.subAlphabets, complementIndexList);
+        List<MealyLearner<I, O>> nextLearners = this.getAll(this.learners, complementIndexList);
+        int retained = nextLearners.size();
+        for (Set<Integer> alphabetIndices : overlaps) {
+            // Merge alphabets, create new learner
+            List<GrowingMapAlphabet<I>> currentAlphabetList = this.getAll(this.subAlphabets, alphabetIndices);
+            GrowingMapAlphabet<I> mergedAlphabet = this.mergeAlphabets(currentAlphabetList);
+            nextAlphabets.add(mergedAlphabet);
+            List<Integer> alphabetIndexList = new ArrayList<>(alphabetIndices);
+            MealyLearner<I, O> firstLearner = this.learners.get(alphabetIndexList.get(0));
+            if (firstLearner instanceof SupportsGrowingAlphabet) {
+                for (I input : mergedAlphabet) {
+                    ((SupportsGrowingAlphabet<I>) firstLearner).addAlphabetSymbol(input);
+                }
+                nextLearners.add(firstLearner);
+            } else {
+                MealyLearner<I, O> mergedLearner = this.learnerSupplier.apply(mergedAlphabet);
+                mergedLearner.startLearning();
+                nextLearners.add(mergedLearner);
+            }
+        }
+        this.subAlphabets = nextAlphabets;
+        this.learners = nextLearners;
+        for (int i = retained; i < this.learners.size(); i++) {
+            this.learnComponent(i);
+        }
+        return true;
+    }
+
+    private<T> Set<T> union(List<Set<T>> sets) {
+        Set<T> result = new HashSet<>();
+        for (Set<T> current : sets) {
+            result.addAll(current);
+        }
+        return result;
+    }
+
+    private List<Set<Integer>> computeOverlap(List<List<Integer>> initial) {
+        List<Set<Integer>> currentSets = new ArrayList<>();
+        for (List<Integer> current : initial) {
+            currentSets.add(new HashSet<>(current));
+        }
+        boolean modified = true;
+        while (modified) {
+            modified = false;
+            List<Set<Integer>> nextSets = new ArrayList<>();
+            for (Set<Integer> current : currentSets) {
+                if (nextSets.isEmpty()) {
+                    nextSets.add(current);
+                } else {
+                    for (Set<Integer> poss : nextSets) {
+                        if (intersects(current, poss)) {
+                            poss.addAll(current);
+                            modified = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            currentSets = nextSets;
+        }
+        return currentSets;
+    }
+
+    private<T> boolean intersects(Set<T> current, Set<T> poss) {
+        Set<T> temp = new HashSet<T>(poss);
+        temp.retainAll(current);
+        return !temp.isEmpty();
+    }
+
+    private List<List<Integer>> analyzeCounterexample(DefaultQuery<I, Word<O>> ce) {
+        MealyMachine<?, I, ?, O> hypothesis = this.getHypothesisModel();
+        //ce = this.shortestPrefixCounterexample(ce);
+        List<Integer> alphabetIndexList = this.involvedAlphabets(ce);
+        for (int k = 2; k <= alphabetIndexList.size(); k++) {
+            List<List<Integer>> result = new ArrayList<>();
+            List<Integer> indexList = this.firstCombination(k);
+            while (indexList != null) {
+                List<Integer> currentAlphabetIndexList = this.getAll(alphabetIndexList, indexList);
+                List<GrowingMapAlphabet<I>> currentAlphabetList = this.getAll(this.subAlphabets, currentAlphabetIndexList);
+                Alphabet<I> currentAlphabet = this.mergeAlphabets(currentAlphabetList);
+                DefaultQuery<I, Word<O>> projectedQuery = this.projectQuery(ce, currentAlphabet);
+                if (!projectedQuery.getOutput().equals(hypothesis.computeOutput(projectedQuery.getInput()))) {
+                    result.add(currentAlphabetIndexList);
+                }
+                indexList = this.nextCombination(indexList, alphabetIndexList.size() - 1);
+            }
+            if (!result.isEmpty()) {
+                return result;
+            }
+        }
+        throw new IllegalStateException("Given input was not a counterexample");
+    }
+
+    private List<Integer> firstCombination(int k) {
+        List<Integer> result = new ArrayList<>(k);
+        for (int i = 0; i < k; i++) {
+            result.add(i);
+        }
+        return result;
+    }
+
+    private List<Integer> nextCombination(List<Integer> indexList, int max) {
+        int incrementIndex = -1;
+        int current = max;
+        boolean nobreak = true;
+        for (int i = indexList.size() - 1; i >= 0; i--) {
+            if (indexList.get(i) != current) {
+                incrementIndex = i;
+                current = indexList.get(i) + 1;
+                nobreak = false;
+                break;
+            } else {
+                current -= 1;
+            }
+        }
+        if (nobreak) {
+            return null;
+        }
+        List<Integer> result = new ArrayList<>(indexList.subList(0, incrementIndex));
+        for (int i = incrementIndex; i < indexList.size(); i++) {
+            result.add(current);
+            current += 1;
+        }
+        return result;
+    }
+
+    private <T> List<T> getAll(List<T> items, Iterable<Integer> indexList) {
+        List<T> result = new ArrayList<>();
+        for (Integer i : indexList) {
+            result.add(items.get(i));
+        }
+        return result;
+    }
+
+    /**
+     * @param indices Set of indices to be excluded
+     * @param bound     Upper bound (exclusive) of integers to include
+     * @return List of indices smaller than bound, not in indices
+     */
+    private List<Integer> complementList(Set<Integer> indices, int bound) {
+        List<Integer> result = new ArrayList<>();
+        for (int i = 0; i < bound; i++) {
+            if (!indices.contains(i)) {
+                result.add(i);
+            }
+        }
+        return result;
+    }
+
+    private DefaultQuery<I, Word<O>> projectQuery(DefaultQuery<I, Word<O>> query, Alphabet<I> alphabet) {
+        Word<I> input = query.getInput();
+        WordBuilder<I> wb = new WordBuilder<>();
+        for (I symbol : input) {
+            if (alphabet.containsSymbol(symbol)) {
+                wb.add(symbol);
+            }
+        }
+        DefaultQuery<I, Word<O>> result = new DefaultQuery<>(wb.toWord());
+        result.answer(this.mqOracle.answerQuery(result.getInput()));
+        return result;
+    }
+
+    private GrowingMapAlphabet<I> mergeAlphabets(List<GrowingMapAlphabet<I>> currentAlphabetList) {
+        List<I> inputs = new ArrayList<>();
+        for (Alphabet<I> alphabet : currentAlphabetList) {
+            inputs.addAll(alphabet);
+        }
+        return new GrowingMapAlphabet<I>(inputs);
+    }
+
+    private List<Integer> involvedAlphabets(DefaultQuery<I, Word<O>> ce) {
+        ArrayList<Integer> involvedIndexList = new ArrayList<>();
+        for (int i = 0; i < this.subAlphabets.size(); i++) {
+            Alphabet<I> subAlphabet = this.subAlphabets.get(i);
+            for (I input : ce.getInput()) {
+                if (subAlphabet.containsSymbol(input)) {
+                    involvedIndexList.add(i);
+                    break;
+                }
+            }
+        }
+        return involvedIndexList;
+    }
+
+    @SuppressWarnings("unused")
+    private DefaultQuery<I, Word<O>> shortestPrefixCounterexample(DefaultQuery<I, Word<O>> ce) {
+        MealyMachine<?, I, ?, O> hypothesis = this.getHypothesisModel();
+        Word<I> input = ce.getInput();
+        Word<O> output = ce.getOutput();
+        for (int i = 1; i <= input.length(); i++) {
+            Word<I> inputPrefix = input.prefix(i);
+            Word<O> outputPrefix = output.prefix(i);
+            if (!hypothesis.computeOutput(inputPrefix).equals(outputPrefix)) {
+                return new DefaultQuery<I, Word<O>>(inputPrefix, outputPrefix);
+            }
+        }
+        throw new IllegalStateException("Given input was not a counterexample");
+    }
+
+    @Override
+    public void startLearning() {
+        for (int i = 0; i < this.learners.size(); i++) {
+            this.learners.get(i).startLearning();
+            this.learnComponent(i);
+        }
+    }
+
+    private void learnComponent(int index) {
+        System.out.println("Learning component " + String.valueOf(index) + " with alphabet "
+                + this.subAlphabets.get(index).toString());
+        MealyLearner<I, O> learner = this.learners.get(index);
+        while (true) {
+            MealyMachine<?, I, ?, O> hypothesis = learner.getHypothesisModel();
+            DefaultQuery<I, Word<O>> ce = this.eqOracle.findCounterExample(hypothesis, this.subAlphabets.get(index));
+            if (ce == null) {
+                break;
+            }
+            learner.refineHypothesis(ce);
+        }
+    }
+
+    public class ParallelInterleavingMachine<S, T> implements MealyMachine<List<S>, I, Triple<List<S>, Integer, T>, O> {
+
+        private List<MealyMachine<S, I, T, O>> components;
+        private List<GrowingMapAlphabet<I>> subAlphabets;
+        private Alphabet<I> inputAlphabet;
+        private Collection<List<S>> cachedStates;
+
+        public ParallelInterleavingMachine(List<MealyMachine<S, I, T, O>> components,
+                List<GrowingMapAlphabet<I>> subAlphabets, Alphabet<I> inputAlphabet) {
+            this.components = components;
+            this.subAlphabets = subAlphabets;
+            this.inputAlphabet = inputAlphabet;
+        }
+
+        @Override
+        public List<S> getSuccessor(Triple<List<S>, Integer, T> transition) {
+            ArrayList<S> state = new ArrayList<>(transition.getFirst());
+            Integer index = transition.getSecond();
+            S nextState = this.components.get(index).getSuccessor(transition.getThird());
+            state.set(index, nextState);
+            return state;
+        }
+
+        @Override
+        public Collection<List<S>> getStates() {
+            if (cachedStates != null) {
+                return cachedStates;
+            }
+            Set<List<S>> reach = new HashSet<>();
+            Queue<List<S>> bfsQueue = new ArrayDeque<>();
+
+            List<S> init = getInitialState();
+
+            bfsQueue.add(init);
+
+            List<S> curr;
+            while ((curr = bfsQueue.poll()) != null) {
+                if (reach.contains(curr))
+                    continue;
+
+                for (I in : this.inputAlphabet) {
+                    List<S> succ = getSuccessor(curr, in);
+                    if (succ == null)
+                        continue;
+
+                    if (!reach.contains(succ)) {
+                        bfsQueue.add(succ);
+                    }
+                }
+                reach.add(curr);
+            }
+            cachedStates = reach;
+            return cachedStates;
+        }
+
+        @Override
+        public @Nullable List<S> getInitialState() {
+            return this.components.stream().map(MealyMachine::getInitialState).toList();
+        }
+
+        @Override
+        public @Nullable Triple<List<S>, Integer, T> getTransition(List<S> states, I input) {
+            int index = -1;
+            for (int i = 0; i < subAlphabets.size(); i++) {
+                if (subAlphabets.get(i).containsSymbol(input)) {
+                    index = i;
+                }
+            }
+            if (index == -1) {
+                throw new IllegalArgumentException("None of the subalphabets contains the input " + input.toString());
+            }
+            T transition = this.components.get(index).getTransition(states.get(index), input);
+            return Triple.of(states, index, transition);
+        }
+
+        @Override
+        public Void getStateProperty(List<S> state) {
+            return null;
+        }
+
+        @Override
+        public O getTransitionOutput(Triple<List<S>, Integer, T> transition) {
+            return this.components.get(transition.getSecond()).getTransitionOutput(transition.getThird());
+        }
+
+    }
+
+}

@@ -1,6 +1,16 @@
 # VSCode Setup
 .vscode/
+
+# Python
 code/python/.venv/
+code/python/decompose_fsm.py
+
+# Data
+decompositions/
+results/
+
+# Jupyter notebooks
+*.ipynb
 
 # Compiled class file
 *.class

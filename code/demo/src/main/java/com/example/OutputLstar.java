@@ -15,6 +15,8 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
+import org.sat4j.specs.ContradictionException;
+import org.sat4j.specs.TimeoutException;
 
 import de.learnlib.algorithm.LearningAlgorithm.MealyLearner;
 import de.learnlib.query.DefaultQuery;
@@ -36,6 +38,11 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     public int inconsistentCount = 0;
     public int zeroOutputsCount = 0;
     public int twoOutputsCount = 0;
+
+    // Variables for optimal map
+    private boolean recomputeOptimal = true;
+    private int previousOutputAlphabetSize = 0;
+    private int previousResultSize = 0;
 
     /**
      * Constructor for OL*
@@ -60,7 +67,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         if (outputMapSupplier != null) {
             this.outputMapSupplier = outputMapSupplier;
         } else {
-            this.outputMapSupplier = this::singleOutputMap;
+            this.outputMapSupplier = this::optimalMap; //this::singleOutputMap;
         }
     }
 
@@ -82,6 +89,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
 
     private boolean refineHypothesis(DefaultQuery<I, Word<O>> ce, boolean fixDefects) {
         boolean refined;
+        this.recomputeOptimal = true;
         Word<I> ceWord = ce.getInput();
         do {
             refined = false;
@@ -292,7 +300,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             List<Pair<Integer, OutputRow<I, O>>> transition = hypothesis.getTransition(state, in);
             Set<O> outputs = hypothesis.getTransitionOutputSet(transition);
             if (outputs.size() != 1) {
-                System.out.println("Same defect");
+                System.out.println("Same defect: " + ce.toString());
                 return true;
             }
             state = hypothesis.getSuccessor(transition);
@@ -362,6 +370,26 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         }
         List<Map<O, Integer>> result = new ArrayList<>(1);
         result.add(identity);
+        return result;
+    }
+
+    private List<Map<O, Integer>> optimalMap() {
+        if(!recomputeOptimal && this.table.getOutputAlphabet().size() == this.previousOutputAlphabetSize) {
+            return this.table.getOutputMaps();
+        }
+        System.out.println("Begin SAT");
+        DecomposeObservationTable<O> decomposer = new DecomposeObservationTable<>();
+        List<Map<O, Integer>> result = null;
+        try {
+            result = decomposer.decompose(this.table, 3, this.previousResultSize-1);
+        } catch (ContradictionException | TimeoutException e) {
+            e.printStackTrace();
+            System.exit(-1);
+        }
+        System.out.println("End SAT");
+        this.recomputeOptimal = false;
+        this.previousOutputAlphabetSize = this.table.getOutputAlphabet().size();
+        this.previousResultSize = decomposer.getResultSize();
         return result;
     }
 

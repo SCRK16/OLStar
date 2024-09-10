@@ -56,6 +56,12 @@
             <artifactId>jakarta.annotation-api</artifactId>
             <version>3.0.0-M1</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.sat4j</groupId>
+            <artifactId>org.sat4j.maxsat</artifactId>
+            <version>2.3.1</version>
+        </dependency>
     </dependencies>
 </project>
 

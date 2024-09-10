@@ -218,16 +218,20 @@ public class OutputObservationTable<I, O, D> {
         return outputAlphabet;
     }
 
-    public List<OutputRow<I, O>> getLongPrefixRows() {
-        return Collections.unmodifiableList(this.longPrefixRows);
-    }
-
     public Word<I> getRow(int index) {
         return this.allRows.get(index).getLabel();
     }
 
+    public List<OutputRow<I, O>> getAllRows() {
+        return Collections.unmodifiableList(this.allRows);
+    }
+
     public List<OutputRow<I, O>> getShortPrefixRows() {
         return Collections.unmodifiableList(this.shortPrefixRows);
+    }
+
+    public List<OutputRow<I, O>> getLongPrefixRows() {
+        return Collections.unmodifiableList(this.longPrefixRows);
     }
 
     public List<Word<I>> getSuffixes() {

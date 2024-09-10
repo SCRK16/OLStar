@@ -181,8 +181,8 @@ public class Main {
         MealyRandomWpMethodEQOracle<I, O> eqOracle = new MealyRandomWpMethodEQOracle<>(testingCacheOracle, 2, 10);
         MealyLearner<I, O> learner;
         if (algorithm.equals("Decompose")) {
-            Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier = MQOracle -> wrappedClassicLstarMealy(
-                    inputAlphabet, MQOracle);
+            Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier = MQOracle -> new TTTLearnerMealy<I, Boolean>(inputAlphabet, MQOracle, AcexAnalyzers.LINEAR_FWD);
+            //wrappedClassicLstarMealy(inputAlphabet, MQOracle);
             learner = DynamicMealyDecomposer.createDynamicMealyDecomposerWithCache(inputAlphabet, mOracleForLearning,
                     learnerSupplier);
         } else if (algorithm.equals("TTT")) {
@@ -257,7 +257,7 @@ public class Main {
              * ./Main all <algorithm>);
              * System.exit(1);
              */
-            args = new String[] { "_", "L*" };
+            args = new String[] { "_", "OL*" };
         }
         if (args[0].equals("toy")) {
             CompactMealy<Character, Object> target = constructSUL(3);
@@ -279,7 +279,7 @@ public class Main {
             CompactMealy<String, String> target = DOTParsers
                     .mealy()
                     .readModel(new File(args[0])).model;
-            Supplier<List<Map<String, Integer>>> outputMap = OutputMapSuppliers.artificialMaps(args[0]);
+            Supplier<List<Map<String, Integer>>> outputMap = null; //OutputMapSuppliers.artificialMaps(args[0]);
             learn(target, args[1], false, null, null, outputMap);
         }
     }

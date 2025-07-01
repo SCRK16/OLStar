@@ -15,7 +15,13 @@ import net.automatalib.word.Word;
  */
 public class OutputRow<I, O> {
 
+    /**
+     * Input word associated with this row
+     */
     private final Word<I> label;
+    /**
+     * Unique identifier, useful for indexing into lists
+     */
     private final int rowId;
     /**
      * A list of successor rows for every input.
@@ -26,7 +32,7 @@ public class OutputRow<I, O> {
      * For every output map, the short row this row is equal to.
      */
     private ArrayList<OutputRow<I, O>> shortRows;
-    /** For every input, the output from this row */
+    /** The output from this row */
     private List<O> outputs;
 
     public OutputRow(Word<I> label, int rowId) {

@@ -2,10 +2,9 @@ package com.example;
 
 import net.automatalib.alphabet.Alphabet;
 import net.automatalib.alphabet.Alphabets;
-import net.automatalib.util.automaton.Automata;
-import net.automatalib.util.automaton.builder.AutomatonBuilders;
 import net.automatalib.automaton.transducer.CompactMealy;
 import net.automatalib.automaton.transducer.MealyMachine;
+import net.automatalib.common.util.Pair;
 import net.automatalib.serialization.dot.DOTParsers;
 import net.automatalib.visualization.Visualization;
 import net.automatalib.word.Word;
@@ -17,19 +16,20 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import com.example.OutputLstar.OutputMapChoice;
 
 import de.learnlib.acex.AcexAnalyzers;
 import de.learnlib.algorithm.LearningAlgorithm.MealyLearner;
-import de.learnlib.algorithm.ttt.mealy.TTTLearnerMealy;
 import de.learnlib.oracle.membership.MealySimulatorOracle;
 import de.learnlib.query.DefaultQuery;
-import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
+import de.learnlib.oracle.EquivalenceOracle;
 import de.learnlib.oracle.MembershipOracle;
 import de.learnlib.oracle.equivalence.MealyRandomWpMethodEQOracle;
 import de.learnlib.filter.cache.mealy.MealyCacheOracle;
@@ -38,70 +38,21 @@ import de.learnlib.filter.statistic.oracle.MealyCounterOracle;
 import de.learnlib.algorithm.lstar.ce.ObservationTableCEXHandlers;
 import de.learnlib.algorithm.lstar.closing.ClosingStrategies;
 import de.learnlib.algorithm.lstar.mealy.ClassicLStarMealy;
+import de.learnlib.algorithm.ttt.mealy.TTTLearnerMealy;
 import de.learnlib.util.mealy.MealyUtil;
 
 public class Main {
 
     /**
-     * Create the toy example.
-     *
-     * @param n The number of states of each component
-     * @return The toy example
+     * Wrapper for ClassicLStarMealy so it has the same type as the other learning
+     * algorithms
+     * 
+     * @param <I>           Input alphabet type
+     * @param <O>           Output alphabet type
+     * @param inputAlphabet The input alphabet of the target
+     * @param mqOracle      Oracle for membership queries
+     * @return
      */
-    public static CompactMealy<Character, Object> constructSUL(int n) {
-        Alphabet<Character> alphabet = Alphabets.fromArray('a', 'b');
-        var result = AutomatonBuilders.newMealy(alphabet).withInitial(0);
-        for (int i = 0; i < n; i++) {
-            result.from(i)
-                    .on('a').withOutput((i + 1) % n).to((i + 1) % n)
-                    .on('b').withOutput(i).to(i + n);
-            result.from(i + n)
-                    .on('a').withOutput((i + n - 1) % n).to((i + n - 1) % n + n)
-                    .on('b').withOutput(i).to(i);
-        }
-        return result.create();
-    }
-
-    /**
-     * Create the output alphabet of the toy example. Can be used to provide an
-     * algorithm with the output alphabet up front.
-     *
-     * @param n The number of states of each component in the toy example
-     * @return The output alphabet of the toy example
-     */
-    public static Alphabet<Object> SULOutputAlphabet(int n) {
-        ArrayList<Integer> outputs = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            outputs.add(i);
-        }
-        return Alphabets.fromList(outputs);
-    }
-
-    /**
-     * Create a machine which shows that an output-closed and output-consistent
-     * observation table can still result in a component-inconsistent family of
-     * Mealy machines.
-     *
-     * @return The machine
-     */
-    public static CompactMealy<Character, Object> constructComponentInconsistentSUL() {
-        Alphabet<Character> alphabet = Alphabets.fromArray('a', 'b');
-        return AutomatonBuilders.newMealy(alphabet).withInitial("qe")
-                .from("qe")
-                .on('a').withOutput('0').to("qa")
-                .on('b').withOutput('1').to("qb")
-                .from("qa")
-                .on('a').withOutput('1').to("qaa")
-                .on('b').withOutput('2').to("qaa")
-                .from("qb")
-                .on('a').withOutput('0').to("qaa")
-                .on('b').withOutput('2').to("qaa")
-                .from("qaa")
-                .on('a').withOutput('2').to("qaa")
-                .on('b').withOutput('0').to("qaa")
-                .create();
-    }
-
     public static <I, O> MealyLearner<I, O> wrappedClassicLstarMealy(Alphabet<I> inputAlphabet,
             MembershipOracle<I, Word<O>> mqOracle) {
         return MealyUtil.wrapSymbolLearner(
@@ -119,10 +70,11 @@ public class Main {
      * @param eqOracle      the equivelance oracle
      * @param target        The target Mealy machine, used to check if an
      *                      equivalence query is necessary
+     * @param ceLogWriter   Writer for recording counterexamples
      * @return The number of rounds needed to learn the Mealy machine
      */
     public static <I, O> int learnLoop(MealyLearner<I, O> learner, Alphabet<I> inputAlphabet,
-            MealyEquivalenceOracle<I, O> eqOracle, MealyMachine<?, I, ?, O> target) {
+            EquivalenceOracle<MealyMachine<?, I, ?, O>, I, Word<O>> eqOracle, MealyMachine<?, I, ?, O> target, BufferedWriter ceLogWriter) throws IOException {
         if (target == null) {
             throw new IllegalStateException("Target cannot be null");
         }
@@ -135,17 +87,14 @@ public class Main {
 
             System.out.println("Number of states at stage " + stage + ": " + hypothesis.size());
 
-            // Quick check to avoid expensive final EQ.
-            // We do not use this to find actual counterexamples.
-            Word<I> sep = Automata.findSeparatingWord(target, hypothesis, inputAlphabet);
-            if (sep == null)
-                break;
-
             // Find counterexample.
-            DefaultQuery<I, Word<O>> ce = eqOracle.findCounterExample(hypothesis, inputAlphabet);
+            DefaultQuery<I, Word<O>> ce = eqOracle.findCounterExample(hypothesis, inputAlphabet); // opslaan -> SampleSetEqOracle
             if (ce == null)
-                throw new IllegalStateException(
-                        "Equivalence Oracle couldn't find counterexample, even though a separating word exists.");
+                break;
+            if (ceLogWriter != null) {
+                System.out.println(ce.toString());
+                ceLogWriter.append(ce.toString() + "\n");
+            }
             System.out.println(
                     "Counterexample: " + ce.toString() + ", hypothesis: " + hypothesis.computeOutput(ce.getInput()));
             learner.refineHypothesis(ce);
@@ -162,7 +111,7 @@ public class Main {
      * @param algorithm         The name of the algorithm to be used
      * @param visualize         Set to true to visualize the results (works poorly
      *                          when target has many states)
-     * @param file              The file to store the results in, set to null if
+     * @param resultFile              The file to store the results in, set to null if
      *                          results should not be stored
      * @param name              The name of the file to store the results in
      * @param outputMapSupplier The supplier of the output map for OL*. If null, use
@@ -170,40 +119,57 @@ public class Main {
      *                          algorithms
      * @throws IOException
      */
-    public static <I, O> void learn(CompactMealy<I, O> target, String algorithm, boolean visualize, File file,
-            String name, Supplier<List<Map<O, Integer>>> outputMapSupplier) throws IOException {
-        Alphabet<I> inputAlphabet = target.getInputAlphabet();
+    public static <I, O> void learn(MealyMachine<?, I, ?, O> target, Alphabet<I> inputAlphabet, String algorithm,
+            boolean visualize, File resultFile,
+            String name, Supplier<List<Map<O, Integer>>> outputMapSupplier, SampleSetEQOracle<MealyMachine<?, I, ?, O>, I, Word<O>> predeterminedEqOaracle, BufferedWriter ceLogWriter) throws IOException {
         MealySimulatorOracle<I, O> mOracle = new MealySimulatorOracle<>(target);
         MealyCounterOracle<I, O> mOracleForLearning = new MealyCounterOracle<>(mOracle);
         MealyCacheOracle<I, O> mCacheOracle = MealyCaches.createTreeCache(inputAlphabet, mOracleForLearning);
         MealyCounterOracle<I, O> mOracleForTesting = new MealyCounterOracle<>(mOracle);
         MealyCacheOracle<I, O> testingCacheOracle = MealyCaches.createTreeCache(inputAlphabet, mOracleForTesting);
-        MealyRandomWpMethodEQOracle<I, O> eqOracle = new MealyRandomWpMethodEQOracle<>(testingCacheOracle, 2, 10);
-        MealyLearner<I, O> learner;
-        if (algorithm.equals("Decompose")) {
-            Function<MembershipOracle<I, Word<Boolean>>, MealyLearner<I, Boolean>> learnerSupplier = MQOracle -> new TTTLearnerMealy<I, Boolean>(inputAlphabet, MQOracle, AcexAnalyzers.LINEAR_FWD);
-            //wrappedClassicLstarMealy(inputAlphabet, MQOracle);
-            learner = DynamicMealyDecomposer.createDynamicMealyDecomposerWithCache(inputAlphabet, mOracleForLearning,
-                    learnerSupplier);
-        } else if (algorithm.equals("TTT")) {
-            learner = new TTTLearnerMealy<>(inputAlphabet, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
-        } else if (algorithm.equals("OLstar") || algorithm.equals("OL*")) {
-            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true, false, outputMapSupplier);
-        } else if (algorithm.equals("Lstar") || algorithm.equals("L*")) {
-            learner = wrappedClassicLstarMealy(inputAlphabet, mCacheOracle);
-        } else if (algorithm.equals("ILstar") || algorithm.equals("IL*")) {
-            EarlyBreakEQOracle<I, O> earlyBreakOracle = new EarlyBreakEQOracle<>(target, eqOracle);
-            Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new OutputLstar<>(A, mCacheOracle, true,
-                    false, null);
-            // Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = A -> new
-            // TTTLearnerMealy<>(A, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
-            learner = new InputDecomposer<>(inputAlphabet, learnerSupplier, mCacheOracle, earlyBreakOracle);
+        EquivalenceOracle<MealyMachine<?, I, ?, O>, I, Word<O>> eqOracle;
+        if (predeterminedEqOaracle == null) {
+            System.out.println("Using random Wp Method");
+            eqOracle = new EarlyBreakEQOracle<>(target, new MealyRandomWpMethodEQOracle<>(testingCacheOracle, 2, 10));
         } else {
-            throw new UnsupportedOperationException("Valid algorithms: Decompose / TTT / OLstar / Lstar");
+            System.out.println("Using predefined counterexamples");
+            eqOracle = new EarlyBreakEQOracle<>(target, predeterminedEqOaracle);
         }
 
-        int stage = learnLoop(learner, inputAlphabet, eqOracle, target);
+        MealyLearner<I, O> learner;
+        if (algorithm.equals("Bitwise")) {
+            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true, false, OutputMapChoice.Bitwise, null);
+        } else if (algorithm.equals("Lstar") || algorithm.equals("L*") || algorithm.equals("identity")) {
+            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, false, true, OutputMapChoice.Lstar, null);
+        } else if (algorithm.equals("Optimal")) {
+            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true, false, OutputMapChoice.Optimal, null);
+        } else if (algorithm.equals("Precomputed")) {
+            learner = new OutputLstar<I, O>(inputAlphabet, mCacheOracle, true, false, OutputMapChoice.Precomputed,
+                    outputMapSupplier);
+        } else if (algorithm.equals("ILstar") || algorithm.equals("IL*")) {
+            Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier = alphabet -> wrappedClassicLstarMealy(alphabet,
+                    mCacheOracle);
+            learner = new InputDecomposer<I, O>(inputAlphabet, learnerSupplier, mCacheOracle, eqOracle);
+        } else if (algorithm.equals("Generic")) {
+            Function<MembershipOracle<I, Word<Integer>>, MealyLearner<I, Integer>> learnerSupplier = integerOracle -> new TTTLearnerMealy<I, Integer>(
+                    inputAlphabet, integerOracle, AcexAnalyzers.LINEAR_FWD);
+            learner = new GenericDecomposedLearner<I, O>(inputAlphabet, mCacheOracle, learnerSupplier, 2);
+        } else if (algorithm.equals("TTT")) {
+            learner = new TTTLearnerMealy<I, O>(inputAlphabet, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
+        } else {
+            throw new UnsupportedOperationException(
+                    "Valid decompositions: Lstar, Bitwise, Optimal, Precomputed, ILstar");
+        }
+
+        int stage = learnLoop(learner, inputAlphabet, eqOracle, target, ceLogWriter);
         System.out.println("Done!");
+        if (learner instanceof OutputLstar) {
+            System.out.println("Recomputing maps");
+            OutputLstar<I, O> outputLearner = (OutputLstar<I, O>) learner;
+            outputLearner.recomputeOptimal = true;
+            List<Map<O, Integer>> outputMaps = outputLearner.outputMapSupplier.get();
+            System.out.println(outputMaps.toString());
+        }
         System.out.println("Learning: " + mOracleForLearning.getStatisticalData().getSummary());
         System.out.println("Testing: " + mOracleForTesting.getStatisticalData().getSummary());
         System.out.println("Rounds: " + stage);
@@ -213,26 +179,18 @@ public class Main {
             System.out.println("Zero outputs count: " + String.valueOf(outputLearner.zeroOutputsCount));
             System.out.println("Two outputs count: " + String.valueOf(outputLearner.twoOutputsCount));
         }
-
         if (visualize) {
             Visualization.visualize(learner.getHypothesisModel(), inputAlphabet, true);
         }
 
-        if (file != null) {
-            BufferedWriter writer = new BufferedWriter(new FileWriter(file, true));
+        if (resultFile != null) {
+            BufferedWriter writer = new BufferedWriter(new FileWriter(resultFile, true));
             writer.append("Model learned: ");
             writer.append(name);
             writer.append("\nNumber of stages: ");
             writer.append(String.valueOf(stage));
             writer.append("\nNumber of states found: ");
             writer.append(String.valueOf(learner.getHypothesisModel().size()));
-            if (learner instanceof DynamicMealyDecomposer) {
-                writer.append("\nComponent sizes: ");
-                for (MealyLearner<I, Boolean> component : ((DynamicMealyDecomposer<I, O>) learner).learners) {
-                    writer.append(String.valueOf(component.getHypothesisModel().size()));
-                    writer.append(" - ");
-                }
-            }
             if (learner instanceof OutputLstar) {
                 OutputLstar<I, O> outputLearner = (OutputLstar<I, O>) learner;
                 writer.append("\nNumber of short rows: "
@@ -250,37 +208,77 @@ public class Main {
         }
     }
 
+    private static void walk(String algorithm, Path modelPath, boolean visualize,
+            File results, int repetitions, SampleSetEQOracle<MealyMachine<?, String, ?, String>, String, Word<String>> predeterminedEqOaracle, BufferedWriter ceLogWriter) throws IOException {
+        Stream<Path> paths = Files.walk(modelPath);
+        for (Path path : paths.filter(Files::isRegularFile).toList()) {
+            System.out.println(path.toString());
+            //if (!path.getFileName().toString().startsWith("random-2-5")) {
+            //    continue;
+            //}
+            CompactMealy<String, String> target = DOTParsers.mealy().readModel(path.toFile()).model;
+            String decomposition = "decompositions\\" + path.getFileName().toString().replace(".dot", ".txt");
+            Supplier<List<Map<String, Integer>>> outputMapSupplier = OutputMapSuppliers.from(decomposition);
+            for (int i = 0; i < repetitions; i++)
+                learn(target, target.getInputAlphabet(), algorithm, visualize, results, path.toString(),
+                        outputMapSupplier, predeterminedEqOaracle, ceLogWriter);
+        }
+        paths.close();
+        paths = Files.walk(modelPath);
+        for (Path path : paths.filter(Files::isDirectory).collect(Collectors.toList())) {
+            walk(algorithm, path, visualize, results, repetitions, predeterminedEqOaracle, ceLogWriter);
+        }
+        paths.close();
+    }
+
+
+
     public static void main(String[] args) throws IOException {
         if (args.length < 2) {
-            /*
-             * System.err.println("Usage: ./Main toy <algorithm> OR ./Main _ <algorithm>" OR
-             * ./Main all <algorithm>);
-             * System.exit(1);
-             */
-            args = new String[] { "_", "OL*" };
+            System.err.println("Usage: ./Main <algorithm> <model-file> <result-file> <repetitions> <visualize> <ce-input-file> <ce-output-file>");
+            System.exit(1);
+            // args = new String[2];
+            // args[0] = "Generic";
+            // args[1] = "toy";
         }
-        if (args[0].equals("toy")) {
-            CompactMealy<Character, Object> target = constructSUL(3);
-            learn(target, args[1], false, null, null, null);
-        } else if (args[0].equals("all")) {
-            File file = new File("results\\artificial_olstar_one_output_implied.txt");
-            try (Stream<Path> paths = Files.walk(Paths.get("D:\\Models\\Artificial"))) {
-                for (Path path : paths.filter(Files::isRegularFile).toList()) {
-                    CompactMealy<String, String> target = DOTParsers
-                            .mealy()
-                            .readModel(path.toFile()).model;
-                    learn(target, args[1], false, file, path.toString(), null);
+        File results = null;
+        if (args.length >= 3) {
+            results = new File(args[2]);
+        }
+        int repetitions = 1;
+        if (args.length >= 4) {
+            repetitions = Integer.parseInt(args[3]);
+        }
+        boolean visualize = false;
+        if (args.length >= 5) {
+            visualize = args[4].equals("true");
+        }
+        SampleSetEQOracle<MealyMachine<?, String, ?, String>, String, Word<String>> eqOracle = null;
+        if (args.length >= 6) {
+            if (args[5].contains("\\")) {
+                File predeterminedEQFile = new File(args[5]);
+                List<DefaultQuery<String, Word<String>>> queries = Examples.parseEQs(predeterminedEQFile);
+                for (DefaultQuery<String, Word<String>> query : queries) {
+                    System.out.println(query);
                 }
+                eqOracle = new SampleSetEQOracle<>(false);
+                eqOracle.addAll(queries);
             }
+        }
+        BufferedWriter ceLogWriter = null;
+        if (args.length >= 7) {
+            ceLogWriter = new BufferedWriter(new FileWriter(new File(args[6]), true));
+        }
+        if (args[1].equals("toy")) {
+            MealyMachine<?, Character, ?, Pair<Object, Object>> target = Examples.constructExampleSUL(); // Examples.constructSUL(3);
+            learn(target, Alphabets.fromArray('a', 'b', 'c', 'd'), args[0], visualize, results, "toy", null, null, ceLogWriter);
         } else {
-            if (args[0].equals("_")) {
-                args[0] = "models\\random-3-5-1.dot";
-            }
-            CompactMealy<String, String> target = DOTParsers
-                    .mealy()
-                    .readModel(new File(args[0])).model;
-            Supplier<List<Map<String, Integer>>> outputMap = null; //OutputMapSuppliers.artificialMaps(args[0]);
-            learn(target, args[1], false, null, null, outputMap);
+            Path modelPath = Paths.get(args[1]);
+            walk(args[0], modelPath, visualize, results, repetitions, eqOracle, ceLogWriter);
+        }
+        if (ceLogWriter != null) {
+            ceLogWriter.append("\n");
+            ceLogWriter.close();
         }
     }
 }

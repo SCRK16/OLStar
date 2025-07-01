@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.sat4j.core.VecInt;
 import org.sat4j.minisat.SolverFactory;
@@ -14,9 +15,8 @@ import org.sat4j.specs.IVecInt;
 import org.sat4j.specs.TimeoutException;
 
 import net.automatalib.alphabet.Alphabet;
-import net.automatalib.alphabet.GrowingAlphabet;
+import net.automatalib.automaton.transducer.MealyMachine;
 import net.automatalib.common.util.Triple;
-import net.automatalib.word.Word;
 
 /**
  * Decomposes an observation table into multiple (smaller) components.
@@ -25,17 +25,19 @@ import net.automatalib.word.Word;
  * 
  * @implNote For now, only uses decompositions {f_i : O -> Integer}.
  */
-public class DecomposeObservationTable<O> {
+public class DecomposeMealyMachine<O> {//TODO: Change all JavaDoc
 
     private ISolver solver;
     private Map<String, Integer> variableMap;
     private Map<Integer, Triple<Integer, O, O>> outputMap;
     private int resultSize;
+    private boolean verbose;
 
-    public DecomposeObservationTable() {
+    public DecomposeMealyMachine(boolean verbose) {
         this.solver = SolverFactory.newDefault();
         this.variableMap = new HashMap<>();
         this.outputMap = new HashMap<>();
+        this.verbose = verbose;
     }
 
     /**
@@ -56,11 +58,10 @@ public class DecomposeObservationTable<O> {
      * @param table The observation table
      * @param n     The number of components to table should be decomposed into
      */
-    private <I, D> void setup(OutputObservationTable<I, O, D> table, int n) {
+    private <S, I, T> void setup(MealyMachine<S, I, T, O> machine, List<S> states, Alphabet<O> outputAlphabet, int n) {
         this.variableMap.put("true", this.solver.nextFreeVarId(true));
         this.variableMap.put("false", this.solver.nextFreeVarId(true));
         // output relations
-        GrowingAlphabet<O> outputAlphabet = table.getOutputAlphabet();
         for (int id = 0; id < n; id++) {
             for (O o1 : outputAlphabet) {
                 String o1str = o1.toString();
@@ -75,14 +76,13 @@ public class DecomposeObservationTable<O> {
             }
         }
         // row relations
-        List<OutputRow<I, O>> rows = table.getShortPrefixRows();
         for (int id = 0; id < n; id++) {
-            for (OutputRow<I, O> r1 : rows) {
-                String r1str = r1.toString();
-                for (OutputRow<I, O> r2 : rows) {
-                    String r2str = r2.toString();
-                    if (r1str.compareTo(r2str) < 0) {
-                        this.variableMap.put("row-rel" + String.valueOf(id) + ":" + r1str + "=" + r2str,
+            for (S s1 : states) {
+                String s1str = s1.toString();
+                for (S s2 : states) {
+                    String s2str = s2.toString();
+                    if (s1str.compareTo(s2str) < 0) {
+                        this.variableMap.put("state-rel" + String.valueOf(id) + ":" + s1str + "=" + s2str,
                                 this.solver.nextFreeVarId(true));
                     }
                 }
@@ -91,8 +91,8 @@ public class DecomposeObservationTable<O> {
 
         // representatives
         for (int id = 0; id < n; id++) {
-            for (OutputRow<I, O> r : rows) {
-                this.variableMap.put("row-rep" + String.valueOf(id) + ":" + r.toString(),
+            for (S s : states) {
+                this.variableMap.put("state-rep" + String.valueOf(id) + ":" + s.toString(),
                         this.solver.nextFreeVarId(true));
             }
         }
@@ -127,15 +127,15 @@ public class DecomposeObservationTable<O> {
      * @param r2  Second row
      * @return The variable which states that r1 is related to r2 in component id
      */
-    private <I> Integer get_row_rel(int id, OutputRow<I, O> r1, OutputRow<I, O> r2) {
-        String r1str = r1.toString();
-        String r2str = r2.toString();
-        if (r1str.equals(r2str)) {
+    private <S> Integer get_state_rel(int id, S s1, S s2) {
+        String s1str = s1.toString();
+        String s2str = s2.toString();
+        if (s1str.equals(s2str)) {
             return this.variableMap.get("true");
-        } else if (r1str.compareTo(r2str) < 0) {
-            return this.variableMap.get("row-rel" + String.valueOf(id) + ":" + r1str + "=" + r2str);
+        } else if (s1str.compareTo(s2str) < 0) {
+            return this.variableMap.get("state-rel" + String.valueOf(id) + ":" + s1str + "=" + s2str);
         } else {
-            return this.variableMap.get("row-rel" + String.valueOf(id) + ":" + r2str + "=" + r1str);
+            return this.variableMap.get("state-rel" + String.valueOf(id) + ":" + s2str + "=" + s1str);
         }
     }
 
@@ -148,8 +148,8 @@ public class DecomposeObservationTable<O> {
      * @return The variable which states that r is a representative for its
      *         equivalence class in component id
      */
-    private <I> Integer get_row_rep(int id, OutputRow<I, O> r) {
-        return this.variableMap.get("row-rep" + String.valueOf(id) + ":" + r.toString());
+    private <S> Integer get_state_rep(int id, S s) {
+        return this.variableMap.get("state-rep" + String.valueOf(id) + ":" + s.toString());
     }
 
     /**
@@ -209,15 +209,15 @@ public class DecomposeObservationTable<O> {
      *           transitive and outputs and rows are related.
      */
     @SuppressWarnings("unused")
-    private <I> void addRowRelTransitive(List<OutputRow<I, O>> rows, int n) throws ContradictionException {
+    private <S, I> void addStateRelTransitive(List<S> states, int n) throws ContradictionException {
         IVecInt clause = new VecInt();
         for (int id = 0; id < n; id++) {
-            for (OutputRow<I, O> r1 : rows) {
-                for (OutputRow<I, O> r2 : rows) {
-                    for (OutputRow<I, O> r3 : rows) {
-                        clause.push(-this.get_row_rel(id, r1, r2));
-                        clause.push(-this.get_row_rel(id, r2, r3));
-                        clause.push(this.get_row_rel(id, r1, r3));
+            for (S s1 : states) {
+                for (S s2 : states) {
+                    for (S s3 : states) {
+                        clause.push(-this.get_state_rel(id, s1, s2));
+                        clause.push(-this.get_state_rel(id, s2, s3));
+                        clause.push(this.get_state_rel(id, s1, s3));
                         this.solver.addClause(clause);
                         clause.clear();
                     }
@@ -251,23 +251,6 @@ public class DecomposeObservationTable<O> {
     }
 
     /**
-     * Helper function which transforms a list of words into a list of output
-     * symbols
-     * 
-     * @param words List of words
-     * @return List of output symbols in the words
-     */
-    private List<O> flattenWordList(List<Word<O>> words) {
-        List<O> result = new ArrayList<>();
-        for (Word<O> w : words) {
-            for (O o : w) {
-                result.add(o);
-            }
-        }
-        return result;
-    }
-
-    /**
      * Lets the SAT-solver know that the output relations and the row relations are
      * related. To be concrete: All outputs in two rows are related iff the rows
      * themselves are related.
@@ -280,29 +263,30 @@ public class DecomposeObservationTable<O> {
      * @param n              The number of components
      * @throws ContradictionException Thrown if outputs and rows cannot be related
      */
-    private <I, D> void addOutputRowRel(OutputObservationTable<I, O, D> table, Alphabet<O> outputAlphabet,
-            List<OutputRow<I, O>> rows, int n) throws ContradictionException {
+    private <S, I, T> void addOutputStateRel(MealyMachine<S, I, T, O> machine, Alphabet<I> inputAlphabet, Alphabet<O> outputAlphabet,
+            List<S> states, int n) throws ContradictionException {
         IVecInt clause = new VecInt();
         for (int id = 0; id < n; id++) {
-            for (OutputRow<I, O> r1 : rows) {
-                for (OutputRow<I, O> r2 : rows) {
-                    // outputs equivalent => row equivalent
-                    clause.push(this.get_row_rel(id, r1, r2));
-                    List<O> r1os = this.flattenWordList(table.getRowContents(r1));
-                    List<O> r2os = this.flattenWordList(table.getRowContents(r2));
-                    for (int i = 0; i < r1os.size(); i++) {
-                        clause.push(-this.get_rel(id, r1os.get(i), r2os.get(i)));
-                    }
-                    this.solver.addClause(clause);
-                    clause.clear();
+            for (S s1 : states) {
+                for (S s2 : states) {
+                    for (I input : inputAlphabet) {
+                        // s1 ~ s2 => lambda(s1, input) ~ lambda(s2, input)
+                        O o1 = machine.getOutput(s1, input);
+                        O o2 = machine.getOutput(s2, input);
+                        clause.push(-this.get_state_rel(id, s1, s2));
+                        clause.push(this.get_rel(id, o1, o2));
+                        this.solver.addClause(clause);
+                        clause.clear();
 
-                    // row equivalent => outputs equivalent
-                    for (int i = 0; i < r1os.size(); i++) {
-                        clause.push(-this.get_row_rel(id, r1, r2));
-                        clause.push(this.get_rel(id, r1os.get(i), r2os.get(i)));
+                        // s1 ~ s2 => delta(s1, input) ~ delta(s2, input)
+                        S n1 = machine.getSuccessor(s1, input);
+                        S n2 = machine.getSuccessor(s2, input);
+                        clause.push(-this.get_state_rel(id, s1, s2));
+                        clause.push(this.get_state_rel(id, n1, n2));
                         this.solver.addClause(clause);
                         clause.clear();
                     }
+                    // Note: Inverse missing: all outputs and successors equivalent => states equivalent
                 }
             }
         }
@@ -321,25 +305,25 @@ public class DecomposeObservationTable<O> {
      * @throws ContradictionException Thrown if representatives cannot be made
      *                                unique
      */
-    private <I> void addRepresentativesUnique(List<OutputRow<I, O>> rows, int n) throws ContradictionException {
+    private <S> void addRepresentativesUnique(List<S> states, int n) throws ContradictionException {
         IVecInt clause = new VecInt();
         // Only one representative per relation per equivalence class
         for (int id = 0; id < n; id++) {
-            for (int ri1 = 0; ri1 < rows.size(); ri1++) {
-                OutputRow<I, O> r1 = rows.get(ri1);
-                clause.push(this.get_row_rep(id, r1));
-                for (int ri2 = 0; ri2 < ri1; ri2++) {
-                    OutputRow<I, O> r2 = rows.get(ri2);
-                    clause.push(this.get_row_rel(id, r1, r2));
+            for (int si1 = 0; si1 < states.size(); si1++) {
+                S s1 = states.get(si1);
+                clause.push(this.get_state_rep(id, s1));
+                for (int si2 = 0; si2 < si1; si2++) {
+                    S s2 = states.get(si2);
+                    clause.push(this.get_state_rel(id, s1, s2));
                 }
                 this.solver.addClause(clause);
                 clause.clear();
 
-                for (int ri2 = 0; ri2 < ri1; ri2++) {
-                    OutputRow<I, O> r2 = rows.get(ri2);
-                    clause.push(-this.get_row_rep(id, r1));
-                    clause.push(-this.get_row_rep(id, r2));
-                    clause.push(-this.get_row_rel(id, r1, r2));
+                for (int si2 = 0; si2 < si1; si2++) {
+                    S s2 = states.get(si2);
+                    clause.push(-this.get_state_rep(id, s1));
+                    clause.push(-this.get_state_rep(id, s2));
+                    clause.push(-this.get_state_rel(id, s1, s2));
                     this.solver.addClause(clause);
                     clause.clear();
                 }
@@ -365,18 +349,20 @@ public class DecomposeObservationTable<O> {
      * @throws TimeoutException       Thrown if finding the decomposition takes too
      *                                much time
      */
-    private <I> void optimizeRepresentatives(List<OutputRow<I, O>> rows, int n, int lower, int upper)
+    private <S> void optimizeRepresentatives(List<S> states, int n, int lower, int upper)
             throws ContradictionException, TimeoutException {
         IVecInt[] clauses = new VecInt[n];
         for (int id = 0; id < n; id++) {
             clauses[id] = new VecInt();
-            for (OutputRow<I, O> r : rows) {
-                clauses[id].push(this.get_row_rep(id, r));
+            for (S s : states) {
+                clauses[id].push(this.get_state_rep(id, s));
             }
         }
         while (upper - lower > 1) {
             int current = lower + ((upper - lower) >> 1); // (lower+upper)/2, but without integer overflow
-            System.out.println("current: " + current);
+            if (this.verbose) {
+                System.out.println("current: " + current);
+            }
             IConstr[] constrs = new IConstr[n];
             try {
                 for (int id = 0; id < n; id++)
@@ -392,7 +378,9 @@ public class DecomposeObservationTable<O> {
                 lower = current;
             }
         }
-        System.out.println("upper: " + upper);
+        if (this.verbose) {
+            System.out.println("upper: " + upper);
+        }
         for (int id = 0; id < n; id++) {
             this.solver.addAtMost(clauses[id], upper);
             clauses[id].clear();
@@ -421,21 +409,22 @@ public class DecomposeObservationTable<O> {
      * @throws TimeoutException       Thrown if finding the decomposition takes too
      *                                much time.
      */
-    public <I, D> List<Map<O, Integer>> decompose(OutputObservationTable<I, O, D> table, int n, int lower, int upper)
+    public <S, I, T> List<Map<O, Integer>> decompose(MealyMachine<S, I, T, O> machine, Alphabet<I> inputAlphabet,
+            Alphabet<O> outputAlphabet, int n, int lower, int upper)
             throws ContradictionException, TimeoutException {
         this.solver.reset();
-        setup(table, n);
+        List<S> states = machine.getStates().stream().collect(Collectors.toList());
 
-        GrowingAlphabet<O> outputAlphabet = table.getOutputAlphabet();
-        List<OutputRow<I, O>> rows = table.getShortPrefixRows();
+        setup(machine, states, outputAlphabet, n);
 
         this.addConstants();
         this.addOutputRelTransitive(outputAlphabet, n);
-        // this.addRowRelTransitive(rows, n); // Not necessary, see documentation for addRowRelTransitive
+        // this.addRowRelTransitive(rows, n); // Not necessary, see documentation for
+        // addRowRelTransitive
         this.addOutputRelInjective(outputAlphabet, n);
-        this.addOutputRowRel(table, outputAlphabet, rows, n);
-        this.addRepresentativesUnique(rows, n);
-        this.optimizeRepresentatives(rows, n, lower, upper);
+        this.addOutputStateRel(machine, inputAlphabet, outputAlphabet, states, n);
+        this.addRepresentativesUnique(states, n);
+        this.optimizeRepresentatives(states, n, lower, upper);
         return convertResultToMaps(outputAlphabet, n);
     }
 

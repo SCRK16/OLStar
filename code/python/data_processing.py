@@ -71,16 +71,27 @@ def total_queries_lstar(data):
 def total_symbols_lstar(data):
     return [model[4] + model[6] for model in data]
 
+def clean(filename):
+    with open(filename) as f:
+            data = f.readlines()
+    header = data[0]
+    footer = data[-1]
+    initial = "s" + data[0][:-1]
+    data = [x.split(" -> ") for x in data if " -> " in x]
+    data = ["s" + r[0] + " -> s" + r[1] for r in data]
+    data = [header, f"__start0 -> {initial};\n"] + data + [footer]
+    data = ''.join(data)
+    return data
+
 def main():
-    #data_olstar = read_olstar("D:\\Data\\results_labbaf_olstar_random.txt")
-    data_lstar = read_lstar("D:\\Data\\results_labbaf_ttt.txt")
+    #data_olstar = read_olstar("D:\\Code\\OLstar\\results\\artificial_my_lstar.txt")
+    data_lstar = read_lstar("D:\\Code\\OLstar\\results\\protocols_generic_ttt.txt")
     extract_artificial_model_name(data_lstar)
     data_lstar = data_lstar[:-1]
     data_lstar = sorted(data_lstar)
     add_header_lstar(data_lstar)
 
-    #write_to_csv(list(sorted(data_olstar)), "D:\\Data\\results_labbaf_olstar_random.csv")
-    write_to_csv(data_lstar, "D:\\Data\\results_labbaf_ttt.csv")
+    write_to_csv(data_lstar, "D:\\Code\\OLstar\\results\\protocols_generic_ttt.csv")
 
 if __name__ == "__main__":
     main()

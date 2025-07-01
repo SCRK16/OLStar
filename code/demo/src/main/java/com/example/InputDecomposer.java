@@ -9,11 +9,12 @@ import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import de.learnlib.algorithm.LearningAlgorithm;
-import de.learnlib.oracle.EquivalenceOracle.MealyEquivalenceOracle;
+import de.learnlib.oracle.EquivalenceOracle;
 import de.learnlib.oracle.MembershipOracle.MealyMembershipOracle;
 import de.learnlib.query.DefaultQuery;
 import net.automatalib.alphabet.Alphabet;
@@ -25,20 +26,28 @@ import net.automatalib.word.Word;
 import net.automatalib.word.WordBuilder;
 
 /**
- * Implementation of the CL* algorithm from Labbaf et al. (2023) - Compositional Learning for Interleaving Parallel Automata
+ * Implementation of the CL* algorithm from Labbaf et al. (2023) - Compositional Learning for Interleaving Parallel Automata.
+ * <p>
+ * This implementation has three advantages over the original implementation:
+ * <ol>
+ * <li> The learners for the components can use any algorithm, not just L*
+ * <li> We have implemented the MealyLearner interface from LearnLib
+ * <li> The way we calculate how to merge alphabets is <i>slightly</i> smarter (merging all dependent subalphabets of smallest size, instead of just the first one we find)
+ * </ol>
+ * Otherwise, we follow the original implementation and refer to the original paper for documentation.
  */
 public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, O> {
 
     final private Alphabet<I> inputAlphabet;
     final private MealyMembershipOracle<I, O> mqOracle;
-    final private MealyEquivalenceOracle<I, O> eqOracle;
+    final private EquivalenceOracle<MealyMachine<?, I, ?, O>, I, Word<O>> eqOracle;
 
     private List<GrowingMapAlphabet<I>> subAlphabets;
     private List<MealyLearner<I, O>> learners;
     private Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier;
 
     public InputDecomposer(Alphabet<I> inputAlphabet, Function<Alphabet<I>, MealyLearner<I, O>> learnerSupplier,
-            MealyMembershipOracle<I, O> mqOracle, MealyEquivalenceOracle<I, O> eqOracle) {
+            MealyMembershipOracle<I, O> mqOracle, EquivalenceOracle<MealyMachine<?, I, ?, O>, I, Word<O>> eqOracle) {
         this.inputAlphabet = inputAlphabet;
         this.learnerSupplier = learnerSupplier;
         this.mqOracle = mqOracle;
@@ -55,7 +64,7 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
     @Override
     public MealyMachine<?, I, ?, O> getHypothesisModel() {
         return new ParallelInterleavingMachine<>(
-                this.learners.stream().map(MealyLearner::getHypothesisModel).toList(),
+                this.learners.stream().map(MealyLearner::getHypothesisModel).collect(Collectors.toList()),
                 subAlphabets,
                 inputAlphabet);
     }
@@ -140,7 +149,6 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
 
     private List<List<Integer>> analyzeCounterexample(DefaultQuery<I, Word<O>> ce) {
         MealyMachine<?, I, ?, O> hypothesis = this.getHypothesisModel();
-        //ce = this.shortestPrefixCounterexample(ce);
         List<Integer> alphabetIndexList = this.involvedAlphabets(ce);
         for (int k = 2; k <= alphabetIndexList.size(); k++) {
             List<List<Integer>> result = new ArrayList<>();
@@ -347,7 +355,7 @@ public class InputDecomposer<I, O> implements LearningAlgorithm.MealyLearner<I, 
 
         @Override
         public @Nullable List<S> getInitialState() {
-            return this.components.stream().map(MealyMachine::getInitialState).toList();
+            return this.components.stream().map(MealyMachine::getInitialState).collect(Collectors.toList());
         }
 
         @Override

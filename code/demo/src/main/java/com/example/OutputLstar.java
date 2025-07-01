@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.sat4j.specs.ContradictionException;
@@ -40,7 +41,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     public int twoOutputsCount = 0;
 
     // Variables for optimal map
-    private boolean recomputeOptimal = true;
+    public boolean recomputeOptimal = true;
     private int previousOutputAlphabetSize = 0;
     private int previousResultSize = 0;
 
@@ -56,19 +57,37 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
      *                              found, false if OL* should find all
      *                              inconsistencies and pick the word that would fix
      *                              the most inconsistencies at the same time
+     * @param choice                The choice for the output maps to be used.
+     * @param outputMapSupplier     Used as the decompostion if {@code choice} is
+     *                              {@code Precomputed}
      */
     public OutputLstar(Alphabet<I> inputAlphabet, MembershipOracle<I, Word<O>> membershipOracle,
-            boolean checkConsistency, boolean useFirstInconsistency, Supplier<List<Map<O, Integer>>> outputMapSupplier) {
+            boolean checkConsistency, boolean useFirstInconsistency, OutputMapChoice choice,
+            Supplier<List<Map<O, Integer>>> outputMapSupplier) {
+        if (choice == OutputMapChoice.Precomputed && outputMapSupplier == null) {
+            throw new IllegalArgumentException("Predetermined output maps may not be null");
+        }
         this.inputAlphabet = inputAlphabet;
         this.mqOracle = membershipOracle;
         this.checkConsistency = checkConsistency;
         this.useFirstInconsistency = useFirstInconsistency;
         this.table = new OutputObservationTable<>(inputAlphabet, membershipOracle);
-        if (outputMapSupplier != null) {
+        if (choice == OutputMapChoice.Precomputed) {
             this.outputMapSupplier = outputMapSupplier;
-        } else {
-            this.outputMapSupplier = this::optimalMap; //this::singleOutputMap;
+        } else if (choice == OutputMapChoice.Lstar) {
+            this.outputMapSupplier = this::LstarMap;
+        } else if (choice == OutputMapChoice.Bitwise) {
+            this.outputMapSupplier = this::bitwiseMap;
+        } else if (choice == OutputMapChoice.Optimal) {
+            this.outputMapSupplier = this::optimalMap;
         }
+    }
+
+    public enum OutputMapChoice {
+        Precomputed,
+        Lstar,
+        Bitwise,
+        Optimal
     }
 
     @Override
@@ -79,7 +98,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     private OutputMealyMachine<Integer> getHypothesisInternal() {
         List<Map<O, Integer>> outputMaps = this.table.getOutputMaps();
         return new OutputMealyMachine<>(inputAlphabet, this.table.getShortPrefixRows(),
-                outputMaps, this.computeReverseMap(outputMaps));
+                outputMaps, OutputLstar.computeReverseMap(outputMaps));
     }
 
     @Override
@@ -171,7 +190,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
     @Override
     public void startLearning() {
         List<Word<I>> prefixes = Collections.singletonList(Word.epsilon());
-        List<Word<I>> suffixes = this.inputAlphabet.stream().map(Word::fromLetter).toList();
+        List<Word<I>> suffixes = this.inputAlphabet.stream().map(Word::fromLetter).collect(Collectors.toList());
         this.table.initialize(prefixes, suffixes);
         this.closeTable();
         this.fixReachableDefects();
@@ -327,13 +346,12 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
 
     /**
      * Creates a map for every output, where in each map a single output is 1 and
-     * every other output is send to 0.
+     * every other output is sent to 0.
      * 
      * @return List of maps, where every map sends a single output to 1
      *         and the rest to 0
      */
-    @SuppressWarnings("unused")
-    private List<Map<O, Integer>> singleOutputMap() {
+    private List<Map<O, Integer>> bitwiseMap() {
         List<Map<O, Integer>> result = new ArrayList<>();
         GrowingAlphabet<O> outputAlphabet = this.table.getOutputAlphabet();
         boolean first = true;
@@ -361,7 +379,6 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
      * @return List of maps, where the only element in the list sends each output to
      *         a unique integer
      */
-    @SuppressWarnings("unused")
     private List<Map<O, Integer>> LstarMap() {
         Map<O, Integer> identity = new HashMap<>();
         GrowingAlphabet<O> outputAlphabet = this.table.getOutputAlphabet();
@@ -373,15 +390,32 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         return result;
     }
 
+    /**
+     * Tries to find the optimal weak decomposition of the observation table into
+     * components. This is by finding the best weak decomposition for a given number
+     * of components using a SAT solver, and increasing the number of components
+     * until there is no benefit to using more components.
+     * 
+     * @return List of maps, corresponding to the optimal weak decomposition
+     */
     private List<Map<O, Integer>> optimalMap() {
-        if(!recomputeOptimal && this.table.getOutputAlphabet().size() == this.previousOutputAlphabetSize) {
+        if (!recomputeOptimal && this.table.getOutputAlphabet().size() == this.previousOutputAlphabetSize) {
             return this.table.getOutputMaps();
         }
         System.out.println("Begin SAT");
         DecomposeObservationTable<O> decomposer = new DecomposeObservationTable<>();
-        List<Map<O, Integer>> result = null;
+        int rows = this.table.getShortPrefixRows().size();
+        int components = 1, best, previous = rows;
+        List<Map<O, Integer>> best_result = this.LstarMap();
+        List<Map<O, Integer>> previous_result = best_result;
         try {
-            result = decomposer.decompose(this.table, 3, this.previousResultSize-1);
+            do {
+                best = previous;
+                best_result = previous_result;
+                components += 1;
+                previous_result = decomposer.decompose(this.table, components, this.previousResultSize - 1, rows);
+                previous = decomposer.getResultSize();
+            } while (previous < best);
         } catch (ContradictionException | TimeoutException e) {
             e.printStackTrace();
             System.exit(-1);
@@ -390,17 +424,22 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
         this.recomputeOptimal = false;
         this.previousOutputAlphabetSize = this.table.getOutputAlphabet().size();
         this.previousResultSize = decomposer.getResultSize();
-        return result;
+        return best_result;
     }
 
-    private List<Map<Integer, Set<O>>> computeReverseMap(List<Map<O, Integer>> outputMap) {
-        List<Map<Integer, Set<O>>> result = new ArrayList<>();
-        GrowingAlphabet<O> outputAlphabet = this.table.getOutputAlphabet();
-        for (Map<O, Integer> oMap : outputMap) {
-            Map<Integer, Set<O>> curMap = new HashMap<>();
-            for (O o : outputAlphabet) {
-                Integer i = oMap.get(o);
-                Set<O> curList = curMap.getOrDefault(i, new HashSet<>());
+    /**
+     * Computes the inverse of the outputMap, satisfying ....
+     * @param outputMap
+     * @return
+     */
+    public static <R, D> List<Map<D, Set<R>>> computeReverseMap(List<Map<R, D>> outputMap) {
+        List<Map<D, Set<R>>> result = new ArrayList<>();
+        for (Map<R, D> oMap : outputMap) {
+            Set<R> outputs = oMap.keySet();
+            Map<D, Set<R>> curMap = new HashMap<>();
+            for (R o : outputs) {
+                D i = oMap.get(o);
+                Set<R> curList = curMap.getOrDefault(i, new HashSet<>());
                 curList.add(o);
                 curMap.put(i, curList);
             }
@@ -438,7 +477,7 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
 
         @Override
         public List<OutputRow<I, O>> getSuccessor(List<Pair<D, OutputRow<I, O>>> transition) {
-            return transition.stream().map(Pair::getSecond).toList();
+            return transition.stream().map(Pair::getSecond).collect(Collectors.toList());
         }
 
         @Override
@@ -511,7 +550,8 @@ public class OutputLstar<I, O> implements MealyLearner<I, O> {
             Set<O> outputs = this.getTransitionOutputSet(transition);
             if (outputs.size() != 1) {
                 throw new IllegalStateException(
-                        "Output for Mealy machine was not well-defined: " + transition.toString() + " / " + outputs.toString());
+                        "Output for Mealy machine was not well-defined: " + transition.toString() + " / "
+                                + outputs.toString());
             }
             return outputs.iterator().next();
         }

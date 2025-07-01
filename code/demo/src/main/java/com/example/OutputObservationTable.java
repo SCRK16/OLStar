@@ -8,6 +8,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 
@@ -177,7 +178,7 @@ public class OutputObservationTable<I, O, D> {
      */
     private void processContents(OutputRow<I, O> row, List<Word<O>> rowContents) {
         table.set(row.getRowId(), new ArrayList<>(rowContents));
-        List<O> outputContents = rowContents.stream().limit(inputAlphabet.size()).map(Word::lastSymbol).toList();
+        List<O> outputContents = rowContents.stream().limit(inputAlphabet.size()).map(Word::lastSymbol).collect(Collectors.toList());
         row.setOutputs(outputContents);
         if (row.isShortPrefixRow()) {
             this.updateContentIds(row, rowContents, 0);
@@ -220,6 +221,10 @@ public class OutputObservationTable<I, O, D> {
 
     public Word<I> getRow(int index) {
         return this.allRows.get(index).getLabel();
+    }
+
+    public List<Word<O>> getRowContents(OutputRow<I, O> row) {
+        return this.table.get(row.getRowId());
     }
 
     public List<OutputRow<I, O>> getAllRows() {
@@ -360,7 +365,7 @@ public class OutputObservationTable<I, O, D> {
             this.buildQueries(queries, lp, suffixes);
             mqOracle.processQueries(queries);
             this.growOutputAlphabet(queries);
-            List<Word<O>> lpRowContents = queries.stream().map(DefaultQuery::getOutput).toList();
+            List<Word<O>> lpRowContents = queries.stream().map(DefaultQuery::getOutput).collect(Collectors.toList());
             this.processContents(lpRow, lpRowContents);
         }
     }

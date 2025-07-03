@@ -74,7 +74,8 @@ public class Main {
      * @return The number of rounds needed to learn the Mealy machine
      */
     public static <I, O> int learnLoop(MealyLearner<I, O> learner, Alphabet<I> inputAlphabet,
-            EquivalenceOracle<MealyMachine<?, I, ?, O>, I, Word<O>> eqOracle, MealyMachine<?, I, ?, O> target, BufferedWriter ceLogWriter) throws IOException {
+            EquivalenceOracle<MealyMachine<?, I, ?, O>, I, Word<O>> eqOracle, MealyMachine<?, I, ?, O> target,
+            BufferedWriter ceLogWriter) throws IOException {
         if (target == null) {
             throw new IllegalStateException("Target cannot be null");
         }
@@ -88,15 +89,20 @@ public class Main {
             System.out.println("Number of states at stage " + stage + ": " + hypothesis.size());
 
             // Find counterexample.
-            DefaultQuery<I, Word<O>> ce = eqOracle.findCounterExample(hypothesis, inputAlphabet); // opslaan -> SampleSetEqOracle
-            if (ce == null)
+            DefaultQuery<I, Word<O>> ce = eqOracle.findCounterExample(hypothesis, inputAlphabet); // opslaan ->
+                                                                                                  // SampleSetEqOracle
+            if (ce == null) {
                 break;
+            }
             if (ceLogWriter != null) {
                 System.out.println(ce.toString());
                 ceLogWriter.append(ce.toString() + "\n");
             }
-            System.out.println(
-                    "Counterexample: " + ce.toString() + ", hypothesis: " + hypothesis.computeOutput(ce.getInput()));
+            if (ce != null)
+                System.out.println(
+                        "Counterexample: " + ce.toString() + ", hypothesis: "
+                                + hypothesis.computeOutput(ce.getInput()));
+            // Visualization.visualize(hypothesis, inputAlphabet, true);
             learner.refineHypothesis(ce);
         }
         return stage;
@@ -111,7 +117,7 @@ public class Main {
      * @param algorithm         The name of the algorithm to be used
      * @param visualize         Set to true to visualize the results (works poorly
      *                          when target has many states)
-     * @param resultFile              The file to store the results in, set to null if
+     * @param resultFile        The file to store the results in, set to null if
      *                          results should not be stored
      * @param name              The name of the file to store the results in
      * @param outputMapSupplier The supplier of the output map for OL*. If null, use
@@ -121,7 +127,9 @@ public class Main {
      */
     public static <I, O> void learn(MealyMachine<?, I, ?, O> target, Alphabet<I> inputAlphabet, String algorithm,
             boolean visualize, File resultFile,
-            String name, Supplier<List<Map<O, Integer>>> outputMapSupplier, SampleSetEQOracle<MealyMachine<?, I, ?, O>, I, Word<O>> predeterminedEqOaracle, BufferedWriter ceLogWriter) throws IOException {
+            String name, Supplier<List<Map<O, Integer>>> outputMapSupplier,
+            SampleSetEQOracle<MealyMachine<?, I, ?, O>, I, Word<O>> predeterminedEqOaracle, BufferedWriter ceLogWriter)
+            throws IOException {
         MealySimulatorOracle<I, O> mOracle = new MealySimulatorOracle<>(target);
         MealyCounterOracle<I, O> mOracleForLearning = new MealyCounterOracle<>(mOracle);
         MealyCacheOracle<I, O> mCacheOracle = MealyCaches.createTreeCache(inputAlphabet, mOracleForLearning);
@@ -209,13 +217,15 @@ public class Main {
     }
 
     private static void walk(String algorithm, Path modelPath, boolean visualize,
-            File results, int repetitions, SampleSetEQOracle<MealyMachine<?, String, ?, String>, String, Word<String>> predeterminedEqOaracle, BufferedWriter ceLogWriter) throws IOException {
+            File results, int repetitions,
+            SampleSetEQOracle<MealyMachine<?, String, ?, String>, String, Word<String>> predeterminedEqOaracle,
+            BufferedWriter ceLogWriter) throws IOException {
         Stream<Path> paths = Files.walk(modelPath);
         for (Path path : paths.filter(Files::isRegularFile).toList()) {
             System.out.println(path.toString());
-            //if (!path.getFileName().toString().startsWith("random-2-5")) {
-            //    continue;
-            //}
+            // if (!path.getFileName().toString().startsWith("random-2-5")) {
+            // continue;
+            // }
             CompactMealy<String, String> target = DOTParsers.mealy().readModel(path.toFile()).model;
             String decomposition = "decompositions\\" + path.getFileName().toString().replace(".dot", ".txt");
             Supplier<List<Map<String, Integer>>> outputMapSupplier = OutputMapSuppliers.from(decomposition);
@@ -231,15 +241,11 @@ public class Main {
         paths.close();
     }
 
-
-
     public static void main(String[] args) throws IOException {
         if (args.length < 2) {
-            System.err.println("Usage: ./Main <algorithm> <model-file> <result-file> <repetitions> <visualize> <ce-input-file> <ce-output-file>");
+            System.err.println(
+                    "Usage: ./Main <algorithm> <model-file> <result-file> <repetitions> <visualize> <ce-input-file> <ce-output-file>");
             System.exit(1);
-            // args = new String[2];
-            // args[0] = "Generic";
-            // args[1] = "toy";
         }
         File results = null;
         if (args.length >= 3) {
@@ -271,7 +277,8 @@ public class Main {
         }
         if (args[1].equals("toy")) {
             MealyMachine<?, Character, ?, Pair<Object, Object>> target = Examples.constructExampleSUL(); // Examples.constructSUL(3);
-            learn(target, Alphabets.fromArray('a', 'b', 'c', 'd'), args[0], visualize, results, "toy", null, null, ceLogWriter);
+            learn(target, Alphabets.fromArray('a', 'b', 'c', 'd'), args[0], visualize, results, "toy", null, null,
+                    ceLogWriter);
         } else {
             Path modelPath = Paths.get(args[1]);
             walk(args[0], modelPath, visualize, results, repetitions, eqOracle, ceLogWriter);

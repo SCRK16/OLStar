@@ -26,7 +26,9 @@ import de.learnlib.query.DefaultQuery;
 import net.automatalib.alphabet.Alphabet;
 import net.automatalib.alphabet.GrowingAlphabet;
 import net.automatalib.alphabet.GrowingMapAlphabet;
+import net.automatalib.automaton.transducer.CompactMealy;
 import net.automatalib.automaton.transducer.MealyMachine;
+import net.automatalib.util.automaton.minimizer.hopcroft.HopcroftMinimization;
 import net.automatalib.word.Word;
 import net.automatalib.word.WordBuilder;
 
@@ -44,11 +46,12 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
     private final List<MealyLearner<I, Integer>> delegateLearners;
     private final boolean useOptimalMap;
 
-    //private Integer previousResultSize = 0;
+    // private Integer previousResultSize = 0;
 
     /**
-     * Constructor for using OptimalMap as the decomposition function and a dynamic number of components.
-     */ 
+     * Constructor for using OptimalMap as the decomposition function and a dynamic
+     * number of components.
+     */
     public GenericDecomposedLearner(Alphabet<I> inputAlphabet, MealyCacheOracle<I, O> membershipOracle,
             Function<MembershipOracle<I, Word<Integer>>, MealyLearner<I, Integer>> delegateFunction) {
         this.inputAlphabet = inputAlphabet;
@@ -87,13 +90,16 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
     /**
      * Constructor for using (partial) pre-defined maps.
      * Mappings for undefined components will be using the identity map.
+     * 
      * @implSpec The integers used in the output maps should be in the range 0-#O
      */
     public GenericDecomposedLearner(Alphabet<I> inputAlphabet, MealyCacheOracle<I, O> membershipOracle,
-            Function<MembershipOracle<I, Word<Integer>>, MealyLearner<I, Integer>> delegateFunction, List<Map<O, Integer>> outputMaps) {
+            Function<MembershipOracle<I, Word<Integer>>, MealyLearner<I, Integer>> delegateFunction,
+            List<Map<O, Integer>> outputMaps) {
         this.inputAlphabet = inputAlphabet;
         this.outputAlphabet = new GrowingMapAlphabet<>();
-        this.outputAlphabet.addAll(outputMaps.stream().flatMap(map -> map.keySet().stream()).collect(Collectors.toList()));
+        this.outputAlphabet
+                .addAll(outputMaps.stream().flatMap(map -> map.keySet().stream()).collect(Collectors.toList()));
         this.membershipOracle = membershipOracle;
         this.delegateFunction = delegateFunction;
 
@@ -135,10 +141,24 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
     @Override
     public boolean refineHypothesis(DefaultQuery<I, Word<O>> ce) {
         this.outputAlphabet.addAll(ce.getOutput().asList());
-        this.outputAlphabet.addAll(GenericDecomposedLearner.computeOutputAlphabet(this.getHypothesisModel(), this.inputAlphabet));
+        this.outputAlphabet
+                .addAll(GenericDecomposedLearner.computeOutputAlphabet(this.getHypothesisModel(), this.inputAlphabet));
         this.membershipOracle.answerQuery(ce.getInput());
         if (this.useOptimalMap) {
-            this.outputMaps = this.optimalMap();
+            refineOptimalMap(ce);
+        }
+        this.makeComponentConsistent();
+        this.makeCacheConsistent();
+        return true;
+    }
+
+    private void refineOptimalMap(DefaultQuery<I, Word<O>> ce) {
+        List<Map<O, Integer>> newMaps = this.optimalMap();
+        int oldSize = mapAndMinimize(this.outputMaps);
+        int newSize = mapAndMinimize(newMaps);
+        if (newSize < oldSize) {
+            System.out.println("New better output maps found");
+            this.outputMaps = newMaps;
             this.outputMappers.clear();
             this.delegateOracles.clear();
             this.delegateLearners.clear();
@@ -155,16 +175,26 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
                 delegateLearner.startLearning();
             }
         }
-        this.makeComponentConsistent();
-        this.makeCacheConsistent();
-        return true;
+    }
+
+    private int mapAndMinimize(List<Map<O, Integer>> maps) {
+        int maxSize = 0;
+        MealyMachine<List<Object>, I, List<Object>, O> hypothesis = getHypothesisInternal();
+        for (Map<O, Integer> map : maps) {
+            CompactMealy<I, Integer> mealy = HopcroftMinimization.minimizeMealy(new MappedMealy<>(hypothesis, map), inputAlphabet);
+            int size = mealy.size();
+            if (size > maxSize) {
+                maxSize = size;
+            }
+        }
+        return maxSize;
     }
 
     private void makeCacheConsistent() {
         MealyEquivalenceOracle<I, O> cacheConsistencyOracle = this.membershipOracle.createCacheConsistencyTest();
         MealyMachine<List<Object>, I, List<Object>, O> hypothesis = this.getHypothesisModel();
         DefaultQuery<I, Word<O>> ce = cacheConsistencyOracle.findCounterExample(hypothesis, inputAlphabet);
-        while(ce != null) {
+        while (ce != null) {
             for (int i = 0; i < this.delegateLearners.size(); i++) {
                 this.delegateLearners.get(i).refineHypothesis(this.outputMappers.get(i).mapQuery(ce));
             }
@@ -200,10 +230,12 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
             this.delegateLearners.add(delegate);
             delegate.startLearning();
         }
-        this.outputAlphabet.addAll(GenericDecomposedLearner.computeOutputAlphabet(this.getHypothesisModel(), this.inputAlphabet));
+        this.outputAlphabet
+                .addAll(GenericDecomposedLearner.computeOutputAlphabet(this.getHypothesisModel(), this.inputAlphabet));
     }
 
-    public static <SS, II, TT, OO> Alphabet<OO> computeOutputAlphabet(MealyMachine<SS, II, TT, OO> machine, Alphabet<II> inputAlphabet) {
+    public static <SS, II, TT, OO> Alphabet<OO> computeOutputAlphabet(MealyMachine<SS, II, TT, OO> machine,
+            Alphabet<II> inputAlphabet) {
         GrowingAlphabet<OO> outputAlphabet = new GrowingMapAlphabet<>();
         Collection<SS> reach = new HashSet<>();
         Queue<SS> bfsQueue = new ArrayDeque<>();
@@ -268,7 +300,8 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
                     cur_components += 1;
                 }
                 System.out.println("Components: " + String.valueOf(components));
-                previous_result = decomposer.decompose(machine, this.inputAlphabet, this.outputAlphabet, cur_components, 0, states);
+                previous_result = decomposer.decompose(machine, this.inputAlphabet, this.outputAlphabet, cur_components,
+                        0, states);
                 previous = decomposer.getResultSize();
             } while (previous < best && this.components != null);
         } catch (ContradictionException | TimeoutException e) {
@@ -276,55 +309,9 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
             System.exit(-1);
         }
         System.out.println("End SAT");
-        //this.previousResultSize = decomposer.getResultSize();
+        // this.previousResultSize = decomposer.getResultSize();
         System.out.println(best_result.toString());
         return best_result;
-    }
-
-    public class MappedMealy<S, T, D> implements MealyMachine<S, I, T, D> {
-
-        MealyMachine<S, I, T, O> delegate;
-        Map<O, D> outputMap;
-        Collection<S> cachedStates;
-
-        public MappedMealy(MealyMachine<S, I, T, O> delegate, Map<O, D> outputMap) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public S getSuccessor(T t) {
-            return this.delegate.getSuccessor(t);
-        }
-
-        @Override
-        public Collection<S> getStates() {
-            if (this.cachedStates == null) {
-                this.cachedStates = this.delegate.getStates();
-            }
-            return this.cachedStates;
-        }
-
-        @Override
-        public @Nullable S getInitialState() {
-            return this.delegate.getInitialState();
-        }
-
-        @Override
-        public @Nullable T getTransition(S s, I i) {
-            return this.delegate.getTransition(s, i);
-        }
-
-        @Override
-        public Void getStateProperty(S s) {
-            return null;
-        }
-
-        @Override
-        public D getTransitionOutput(T t) {
-            O o = this.delegate.getTransitionOutput(t);
-            return this.outputMap.get(o);
-        }
-
     }
 
     public class GenericProductMealy<D> implements MealyMachine<List<Object>, I, List<Object>, O> {
@@ -385,9 +372,13 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
 
         /**
          * Checks if all outputs of the machine are well-defined.
-         * If it is, returns {@code null} and stores the state space in the cache. {@code getTransitionOutput} is then guaranteed to never throw an {@code IllegalStateException}.
+         * If it is, returns {@code null} and stores the state space in the cache.
+         * {@code getTransitionOutput} is then guaranteed to never throw an
+         * {@code IllegalStateException}.
          * If it is not, returns a sequence of inputs leading to the inconsistency.
-         * @return {@code null} if consistent, otherwise a sequence of inputs leading to the inconsistency
+         * 
+         * @return {@code null} if consistent, otherwise a sequence of inputs leading to
+         *         the inconsistency
          */
         public Word<I> isConsistent() {
             Set<List<Object>> reach = new HashSet<>();

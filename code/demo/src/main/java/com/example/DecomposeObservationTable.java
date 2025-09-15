@@ -15,6 +15,7 @@ import org.sat4j.specs.TimeoutException;
 
 import net.automatalib.alphabet.Alphabet;
 import net.automatalib.alphabet.GrowingAlphabet;
+import net.automatalib.common.util.Pair;
 import net.automatalib.common.util.Triple;
 import net.automatalib.word.Word;
 
@@ -30,12 +31,14 @@ public class DecomposeObservationTable<O> {
     private ISolver solver;
     private Map<String, Integer> variableMap;
     private Map<Integer, Triple<Integer, O, O>> outputMap;
+    private Map<Integer, Pair<Integer, Integer>> representativeMap; // Map from var to (component, row id)
     private int resultSize;
 
     public DecomposeObservationTable() {
         this.solver = SolverFactory.newDefault();
         this.variableMap = new HashMap<>();
         this.outputMap = new HashMap<>();
+        this.representativeMap = new HashMap<>();
     }
 
     /**
@@ -92,8 +95,9 @@ public class DecomposeObservationTable<O> {
         // representatives
         for (int id = 0; id < n; id++) {
             for (OutputRow<I, O> r : rows) {
-                this.variableMap.put("row-rep" + String.valueOf(id) + ":" + r.toString(),
-                        this.solver.nextFreeVarId(true));
+                int varid = this.solver.nextFreeVarId(true);
+                this.variableMap.put("row-rep" + String.valueOf(id) + ":" + r.toString(), varid);
+                this.representativeMap.put(varid, Pair.of(id, r.getRowId()));
             }
         }
     }
@@ -401,6 +405,36 @@ public class DecomposeObservationTable<O> {
         this.resultSize = upper;
     }
 
+    private <I> boolean isDecomposable(List<OutputRow<I, O>> rows, int n, int upper)
+            throws ContradictionException, TimeoutException {
+        IVecInt[] clauses = new VecInt[n];
+        for (int id = 0; id < n; id++) {
+            clauses[id] = new VecInt();
+            for (OutputRow<I, O> r : rows) {
+                clauses[id].push(this.get_row_rep(id, r));
+            }
+        }
+        IConstr[] constrs = new IConstr[n];
+        try {
+            for (int id = 0; id < n; id++)
+                constrs[id] = this.solver.addAtMost(clauses[id], upper - 1);
+            if (this.solver.isSatisfiable()) {
+                int representatives_count = this.countRepresentatives(n);
+                System.out.println("Upper: " + String.valueOf(upper));
+                System.out.println("Real: " + String.valueOf(representatives_count));
+                for (int id = 0; id < n; id++)
+                    this.solver.removeConstr(constrs[id]);
+                return true;
+            } else {
+                this.resultSize = upper;
+                return false;
+            }
+        } catch (ContradictionException e) {
+            this.resultSize = upper;
+            return false;
+        }
+    }
+
     /**
      * Decompose an observation table into n components.
      * Tries to find a weak decomposition where
@@ -431,12 +465,42 @@ public class DecomposeObservationTable<O> {
 
         this.addConstants();
         this.addOutputRelTransitive(outputAlphabet, n);
-        // this.addRowRelTransitive(rows, n); // Not necessary, see documentation for addRowRelTransitive
+        // this.addRowRelTransitive(rows, n); // Not necessary, see documentation for
+        // addRowRelTransitive
         this.addOutputRelInjective(outputAlphabet, n);
         this.addOutputRowRel(table, outputAlphabet, rows, n);
         this.addRepresentativesUnique(rows, n);
-        this.optimizeRepresentatives(rows, n, lower, upper);
-        return convertResultToMaps(outputAlphabet, n);
+        if (this.isDecomposable(rows, n, upper)) {
+            this.optimizeRepresentatives(rows, n, lower, upper);
+            return convertResultToMaps(outputAlphabet, n);
+        } else {
+            System.out.println("Table is not decomposable");
+            return null;
+        }
+    }
+
+    private int countRepresentatives(int n) throws TimeoutException {
+        if (!this.solver.isSatisfiable()) {
+            return -1;
+        }
+        int[] representatives = new int[n];
+        int[] model = this.solver.findModel();
+        for (int i = 0; i < n; i++) {
+            representatives[i] = 0;
+        }
+        for (int var : model) {
+            if (var < 0) {
+                continue;
+            }
+            Pair<Integer, Integer> row = this.representativeMap.get(var);
+            representatives[row.getFirst()] += 1;
+        }
+        int max = 0;
+        for (int cur : representatives) {
+            if (cur > max)
+                max = cur;
+        }
+        return max;
     }
 
     /**

@@ -16,6 +16,7 @@ import org.sat4j.specs.TimeoutException;
 
 import net.automatalib.alphabet.Alphabet;
 import net.automatalib.automaton.transducer.MealyMachine;
+import net.automatalib.common.util.Pair;
 import net.automatalib.common.util.Triple;
 
 /**
@@ -30,6 +31,7 @@ public class DecomposeMealyMachine<O> {//TODO: Change all JavaDoc
     private ISolver solver;
     private Map<String, Integer> variableMap;
     private Map<Integer, Triple<Integer, O, O>> outputMap;
+    private Map<Integer, Pair<Integer, Integer>> representativeMap;
     private int resultSize;
     private boolean verbose;
 
@@ -37,6 +39,7 @@ public class DecomposeMealyMachine<O> {//TODO: Change all JavaDoc
         this.solver = SolverFactory.newDefault();
         this.variableMap = new HashMap<>();
         this.outputMap = new HashMap<>();
+        this.representativeMap = new HashMap<>();
         this.verbose = verbose;
     }
 
@@ -92,8 +95,9 @@ public class DecomposeMealyMachine<O> {//TODO: Change all JavaDoc
         // representatives
         for (int id = 0; id < n; id++) {
             for (S s : states) {
-                this.variableMap.put("state-rep" + String.valueOf(id) + ":" + s.toString(),
-                        this.solver.nextFreeVarId(true));
+                int varid = this.solver.nextFreeVarId(true);
+                this.variableMap.put("state-rep" + String.valueOf(id) + ":" + s.toString(), varid);
+                this.representativeMap.put(varid, Pair.of(id, s.hashCode()));
             }
         }
     }
@@ -368,7 +372,9 @@ public class DecomposeMealyMachine<O> {//TODO: Change all JavaDoc
                 for (int id = 0; id < n; id++)
                     constrs[id] = this.solver.addAtMost(clauses[id], current);
                 if (this.solver.isSatisfiable()) {
-                    upper = current;
+                    int representatives_count = this.countRepresentatives(n);
+                    System.out.println("Current: " + String.valueOf(current) + ", Real: " + String.valueOf(representatives_count));
+                    upper = representatives_count;
                 } else {
                     lower = current;
                 }
@@ -379,7 +385,7 @@ public class DecomposeMealyMachine<O> {//TODO: Change all JavaDoc
             }
         }
         if (this.verbose) {
-            System.out.println("upper: " + upper);
+            System.out.println("Result: " + upper);
         }
         for (int id = 0; id < n; id++) {
             this.solver.addAtMost(clauses[id], upper);
@@ -387,6 +393,36 @@ public class DecomposeMealyMachine<O> {//TODO: Change all JavaDoc
         }
         this.solver.findModel();
         this.resultSize = upper;
+    }
+
+    private <S> int isDecomposable(List<S> states, int n, int upper)
+            throws ContradictionException, TimeoutException {
+        IVecInt[] clauses = new VecInt[n];
+        for (int id = 0; id < n; id++) {
+            clauses[id] = new VecInt();
+            for (S s : states) {
+                clauses[id].push(this.get_state_rep(id, s));
+            }
+        }
+        IConstr[] constrs = new IConstr[n];
+        try {
+            for (int id = 0; id < n; id++)
+                constrs[id] = this.solver.addAtMost(clauses[id], upper - 1);
+            if (this.solver.isSatisfiable()) {
+                int representatives_count = this.countRepresentatives(n);
+                System.out.println("Upper: " + String.valueOf(upper));
+                System.out.println("Real: " + String.valueOf(representatives_count));
+                for (int id = 0; id < n; id++)
+                    this.solver.removeConstr(constrs[id]);
+                return representatives_count;
+            } else {
+                this.resultSize = upper;
+                return upper;
+            }
+        } catch (ContradictionException e) {
+            this.resultSize = upper;
+            return upper;
+        }
     }
 
     /**
@@ -424,8 +460,40 @@ public class DecomposeMealyMachine<O> {//TODO: Change all JavaDoc
         this.addOutputRelInjective(outputAlphabet, n);
         this.addOutputStateRel(machine, inputAlphabet, outputAlphabet, states, n);
         this.addRepresentativesUnique(states, n);
-        this.optimizeRepresentatives(states, n, lower, upper);
-        return convertResultToMaps(outputAlphabet, n);
+        int cur = this.isDecomposable(states, n, upper);
+        if (cur < upper) {
+            this.optimizeRepresentatives(states, n, lower, cur);
+            return convertResultToMaps(outputAlphabet, n);
+        } else {
+            System.out.println("Machine is not decomposable");
+            return null;
+        }
+    }
+
+    private <I> int countRepresentatives(int n) throws TimeoutException {
+        if (!this.solver.isSatisfiable()) {
+            return -1;
+        }
+        int[] representatives = new int[n];
+        int[] model = this.solver.findModel();
+        for (int i = 0; i < n; i++) {
+            representatives[i] = 0;
+        }
+        for (int var : model) {
+            if (var < 0) {
+                continue;
+            }
+            Pair<Integer, Integer> state = this.representativeMap.get(var);
+            if (state == null)
+                continue;
+            representatives[state.getFirst()] += 1;
+        }
+        int max = 0;
+        for (int cur : representatives) {
+            if (cur > max)
+                max = cur;
+        }
+        return max;
     }
 
     /**

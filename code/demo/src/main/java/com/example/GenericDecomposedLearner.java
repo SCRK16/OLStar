@@ -181,7 +181,8 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
         int maxSize = 0;
         MealyMachine<List<Object>, I, List<Object>, O> hypothesis = getHypothesisInternal();
         for (Map<O, Integer> map : maps) {
-            CompactMealy<I, Integer> mealy = HopcroftMinimization.minimizeMealy(new MappedMealy<>(hypothesis, map), inputAlphabet);
+            CompactMealy<I, Integer> mealy = HopcroftMinimization.minimizeMealy(new MappedMealy<>(hypothesis, map),
+                    inputAlphabet);
             int size = mealy.size();
             if (size > maxSize) {
                 maxSize = size;
@@ -300,10 +301,14 @@ public class GenericDecomposedLearner<I, O> implements MealyLearner<I, O> {
                     cur_components += 1;
                 }
                 System.out.println("Components: " + String.valueOf(components));
+                int lower = (int) Math.ceil(Math.pow(states, 1.0 / cur_components)) - 1;
                 previous_result = decomposer.decompose(machine, this.inputAlphabet, this.outputAlphabet, cur_components,
-                        0, states);
+                        lower, states);
                 previous = decomposer.getResultSize();
-            } while (previous < best && this.components != null);
+            } while (previous < best && this.components == null);
+            if (previous < best) {
+                best_result = previous_result;
+            }
         } catch (ContradictionException | TimeoutException e) {
             e.printStackTrace();
             System.exit(-1);

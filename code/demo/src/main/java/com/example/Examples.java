@@ -26,9 +26,12 @@ import net.automatalib.automaton.CompactTransition;
 import net.automatalib.automaton.transducer.CompactMealy;
 import net.automatalib.automaton.transducer.MealyMachine;
 import net.automatalib.common.util.Pair;
+import net.automatalib.serialization.dot.DOTParsers;
 import net.automatalib.serialization.dot.GraphDOT;
 import net.automatalib.util.automaton.builder.AutomatonBuilders;
 import net.automatalib.util.automaton.builder.MealyBuilder;
+import net.automatalib.util.automaton.minimizer.hopcroft.HopcroftMinimization;
+import net.automatalib.visualization.Visualization;
 import net.automatalib.word.Word;
 import net.automatalib.word.WordBuilder;
 
@@ -94,7 +97,7 @@ public class Examples {
                 .create();
     }
 
-    public static ProductMealy<Integer, Character, CompactTransition<Object>, Object> constructExampleSUL() {
+    public static ProductMealy<Integer, Integer, Character, CompactTransition<Object>, CompactTransition<Object>, Object, Object> constructExampleSUL() {
         Alphabet<Character> alphabet = Alphabets.fromArray('a', 'b', 'c', 'd');
         CompactMealy<Character, Object> first = AutomatonBuilders.newMealy(alphabet).withInitial("q0")
                 .from("q0")
@@ -140,47 +143,49 @@ public class Examples {
                 .on('c').withOutput('1').to("q3")
                 .on('d').withOutput('0').to("q0")
                 .create();
-        return new ProductMealy<Integer, Character, CompactTransition<Object>, Object>(alphabet, first, second);
+        return new ProductMealy<Integer, Integer, Character, CompactTransition<Object>, CompactTransition<Object>, Object, Object>(
+                alphabet, first, second);
     }
 
-    public static class ProductMealy<S, I, T, O> implements MealyMachine<Pair<S, S>, I, Pair<T, T>, Pair<O, O>> {
+    public static class ProductMealy<S1, S2, I, T1, T2, O1, O2>
+            implements MealyMachine<Pair<S1, S2>, I, Pair<T1, T2>, Pair<O1, O2>> {
 
         private final Alphabet<I> inputAlphabet;
-        private final MealyMachine<S, I, T, O> first;
-        private final MealyMachine<S, I, T, O> second;
-        private Collection<Pair<S, S>> cachedStates;
+        private final MealyMachine<S1, I, T1, O1> first;
+        private final MealyMachine<S2, I, T2, O2> second;
+        private Collection<Pair<S1, S2>> cachedStates;
 
-        public ProductMealy(Alphabet<I> inputAlphabet, MealyMachine<S, I, T, O> first,
-                MealyMachine<S, I, T, O> second) {
+        public ProductMealy(Alphabet<I> inputAlphabet, MealyMachine<S1, I, T1, O1> first,
+                MealyMachine<S2, I, T2, O2> second) {
             this.inputAlphabet = inputAlphabet;
             this.first = first;
             this.second = second;
         }
 
         @Override
-        public Pair<S, S> getSuccessor(Pair<T, T> transition) {
+        public Pair<S1, S2> getSuccessor(Pair<T1, T2> transition) {
             return Pair.of(first.getSuccessor(transition.getFirst()), second.getSuccessor(transition.getSecond()));
         }
 
         @Override
-        public Collection<Pair<S, S>> getStates() {
+        public Collection<Pair<S1, S2>> getStates() {
             if (cachedStates != null) {
                 return cachedStates;
             }
-            Set<Pair<S, S>> reach = new HashSet<>();
-            Queue<Pair<S, S>> bfsQueue = new ArrayDeque<>();
+            Set<Pair<S1, S2>> reach = new HashSet<>();
+            Queue<Pair<S1, S2>> bfsQueue = new ArrayDeque<>();
 
-            Pair<S, S> init = getInitialState();
+            Pair<S1, S2> init = getInitialState();
 
             bfsQueue.add(init);
 
-            Pair<S, S> curr;
+            Pair<S1, S2> curr;
             while ((curr = bfsQueue.poll()) != null) {
                 if (reach.contains(curr))
                     continue;
 
                 for (I in : this.inputAlphabet) {
-                    Pair<S, S> succ = getSuccessor(curr, in);
+                    Pair<S1, S2> succ = getSuccessor(curr, in);
                     if (succ == null)
                         continue;
 
@@ -195,23 +200,23 @@ public class Examples {
         }
 
         @Override
-        public @Nullable Pair<S, S> getInitialState() {
+        public @Nullable Pair<S1, S2> getInitialState() {
             return Pair.of(first.getInitialState(), second.getInitialState());
         }
 
         @Override
-        public @Nullable Pair<T, T> getTransition(Pair<S, S> state, I input) {
+        public @Nullable Pair<T1, T2> getTransition(Pair<S1, S2> state, I input) {
             return Pair.of(first.getTransition(state.getFirst(), input),
                     second.getTransition(state.getSecond(), input));
         }
 
         @Override
-        public Void getStateProperty(Pair<S, S> state) {
+        public Void getStateProperty(Pair<S1, S2> state) {
             return null;
         }
 
         @Override
-        public Pair<O, O> getTransitionOutput(Pair<T, T> transition) {
+        public Pair<O1, O2> getTransitionOutput(Pair<T1, T2> transition) {
             return Pair.of(first.getTransitionOutput(transition.getFirst()),
                     second.getTransitionOutput(transition.getSecond()));
         }
@@ -260,7 +265,7 @@ public class Examples {
         return reach;
     }
 
-    private static <S, I, T, O> Pair<Integer, List<Map<O, Integer>>> decompose(MealyMachine<S, I, T, O> machine,
+    public static <S, I, T, O> Pair<Integer, List<Map<O, Integer>>> decompose(MealyMachine<S, I, T, O> machine,
             Alphabet<I> inputs,
             Alphabet<O> outputs) {
         DecomposeMealyMachine<O> decomposer = new DecomposeMealyMachine<>(false);
@@ -279,15 +284,14 @@ public class Examples {
             e.printStackTrace();
             System.exit(-1);
         }
-        System.out.println("Decomposition: " + previous_result.toString());
         return Pair.of(previous, previous_result);
     }
 
     @SuppressWarnings("unused")
-    private static void find3Decomposition() throws IOException {
-        int count = 21;
+    public static void find3Decomposition() throws IOException {
+        int count = 3;
         int wantedSize = 4;
-        while (count <= 30) {
+        while (count <= 10) {
             Alphabet<Character> inputs = Alphabets.fromArray('a', 'b');
             Alphabet<Character> outputs = Alphabets.fromArray('x', 'y', 'z');
             MealyMachine<Integer, Character, CompactTransition<Character>, Character> fsm1;
@@ -307,20 +311,20 @@ public class Examples {
                 fsm2 = randomMealy(wantedSize - 1, inputs, outputs);
                 fsm2size = reachable(fsm2, inputs).size();
             } while (fsm2size != wantedSize - 1);
-            ProductMealy<Integer, Character, CompactTransition<Character>, Character> product = new ProductMealy<>(
+            ProductMealy<Integer, Integer, Character, CompactTransition<Character>, CompactTransition<Character>, Character, Character> product = new ProductMealy<>(
                     inputs, fsm1, fsm2);
             Pair<Integer, List<Map<Pair<Character, Character>, Integer>>> productsize = decompose(product, inputs,
                     GenericDecomposedLearner.computeOutputAlphabet(product, inputs));
             if (productsize.getFirst() < wantedSize) {
                 System.out.println(productsize);
                 FileWriter fsm1File = new FileWriter(
-                        "C:\\Users\\rk9\\Desktop\\Examples\\Example-" + String.valueOf(count) + "-L");
+                        "C:\\Users\\rk9\\Desktop\\Examples\\Example-" + String.valueOf(count) + "-L.dot");
                 FileWriter fsm2File = new FileWriter(
-                        "C:\\Users\\rk9\\Desktop\\Examples\\Example-" + String.valueOf(count) + "-R");
+                        "C:\\Users\\rk9\\Desktop\\Examples\\Example-" + String.valueOf(count) + "-R.dot");
                 GraphDOT.write(fsm1, inputs, fsm1File);
                 GraphDOT.write(fsm2, inputs, fsm2File);
                 File decompositionFile = new File(
-                        "C:\\Users\\rk9\\Desktop\\Examples\\Example-" + String.valueOf(count) + "-Decomposition");
+                        "C:\\Users\\rk9\\Desktop\\Examples\\Example-" + String.valueOf(count) + "-Decomposition.txt");
                 FileWriter decompositionFileWriter = new FileWriter(decompositionFile);
                 decompositionFileWriter.write(productsize.getSecond().toString());
                 decompositionFileWriter.close();
@@ -329,6 +333,47 @@ public class Examples {
             }
         }
         System.exit(0);
+    }
+
+    @SuppressWarnings("unchecked")
+    public void inspectDecomposition(File left_file, File right_file) throws IOException {
+        Alphabet<String> inputAlphabet = Alphabets.fromArray("a", "b");
+        MealyMachine<Object, String, Object, String> left = (MealyMachine<Object, String, Object, String>) (Object) DOTParsers
+                .mealy().readModel(left_file).model;
+        MealyMachine<Object, String, Object, String> right = (MealyMachine<Object, String, Object, String>) (Object) DOTParsers
+                .mealy().readModel(right_file).model;
+        Examples.ProductMealy<?, ?, String, ?, ?, String, String> product = new ProductMealy<>(inputAlphabet, left,
+                right);
+        Alphabet<Pair<String, String>> outputAlphabet = GenericDecomposedLearner.computeOutputAlphabet(product,
+                inputAlphabet);
+        Visualization.visualize(HopcroftMinimization.minimizeMealy(left, inputAlphabet), inputAlphabet, true);
+        Visualization.visualize(HopcroftMinimization.minimizeMealy(right, inputAlphabet), inputAlphabet, true);
+        Visualization.visualize(HopcroftMinimization.minimizeMealy(product, inputAlphabet), inputAlphabet, true);
+        Pair<Integer, List<Map<Pair<String, String>, Integer>>> result = Examples.decompose(product, inputAlphabet,
+                outputAlphabet);
+        System.out.println("\n");
+        System.out.println(Examples
+                .decompose(left, inputAlphabet, GenericDecomposedLearner.computeOutputAlphabet(left, inputAlphabet))
+                .toString());
+        System.out.println("\n");
+        System.out.println(result.toString());
+        System.out.println("\n");
+        List<Map<Pair<String, String>, Integer>> maps = result.getSecond();
+        MealyMachine<Object, String, Object, Integer> firstMealy = (MealyMachine<Object, String, Object, Integer>) (Object) HopcroftMinimization
+                .minimizeMealy(new MappedMealy<>(product, maps.get(0)), inputAlphabet);
+        MealyMachine<Object, String, Object, Integer> secondMealy = (MealyMachine<Object, String, Object, Integer>) (Object) HopcroftMinimization
+                .minimizeMealy(new MappedMealy<>(product, maps.get(1)), inputAlphabet);
+        MealyMachine<Object, String, Object, Integer> thirdMealy = (MealyMachine<Object, String, Object, Integer>) (Object) HopcroftMinimization
+                .minimizeMealy(new MappedMealy<>(product, maps.get(2)), inputAlphabet);
+        Visualization.visualize(HopcroftMinimization.minimizeMealy(firstMealy, inputAlphabet), inputAlphabet, true);
+        Visualization.visualize(HopcroftMinimization.minimizeMealy(secondMealy, inputAlphabet), inputAlphabet, true);
+        Visualization.visualize(HopcroftMinimization.minimizeMealy(thirdMealy, inputAlphabet), inputAlphabet, true);
+        MealyMachine<Pair<Object, Object>, String, Pair<Object, Object>, Pair<Integer, Integer>> firstProduct = new ProductMealy<>(
+                inputAlphabet, firstMealy, secondMealy);
+        MealyMachine<?, String, ?, ?> secondProduct = new ProductMealy<>(inputAlphabet, firstProduct, thirdMealy);
+        Visualization.visualize(HopcroftMinimization.minimizeMealy(secondProduct, inputAlphabet), inputAlphabet, true);
+        List<Map<Integer, Set<Pair<String, String>>>> reverseMap = OutputLstar.computeReverseMap(maps);
+        System.out.println(reverseMap.toString());
     }
 
     private static DefaultQuery<String, Word<String>> parseLine(String line) {

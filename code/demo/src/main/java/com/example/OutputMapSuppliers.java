@@ -241,7 +241,7 @@ public class OutputMapSuppliers {
         File file = new File(decomposition);
         try {
             if (file.exists() && !file.isDirectory()) {
-                    return fromFile(file);
+                return fromFile(file);
             }
             return artificialMaps(decomposition);
         } catch (FileNotFoundException e) {

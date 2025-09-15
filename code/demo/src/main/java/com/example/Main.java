@@ -89,8 +89,7 @@ public class Main {
             System.out.println("Number of states at stage " + stage + ": " + hypothesis.size());
 
             // Find counterexample.
-            DefaultQuery<I, Word<O>> ce = eqOracle.findCounterExample(hypothesis, inputAlphabet); // opslaan ->
-                                                                                                  // SampleSetEqOracle
+            DefaultQuery<I, Word<O>> ce = eqOracle.findCounterExample(hypothesis, inputAlphabet);
             if (ce == null) {
                 break;
             }
@@ -102,7 +101,6 @@ public class Main {
                 System.out.println(
                         "Counterexample: " + ce.toString() + ", hypothesis: "
                                 + hypothesis.computeOutput(ce.getInput()));
-            // Visualization.visualize(hypothesis, inputAlphabet, true);
             learner.refineHypothesis(ce);
         }
         return stage;
@@ -159,9 +157,10 @@ public class Main {
                     mCacheOracle);
             learner = new InputDecomposer<I, O>(inputAlphabet, learnerSupplier, mCacheOracle, eqOracle);
         } else if (algorithm.equals("Generic")) {
+            int components = Integer.parseInt(name.split("-")[1].substring(0, 1));
             Function<MembershipOracle<I, Word<Integer>>, MealyLearner<I, Integer>> learnerSupplier = integerOracle -> new TTTLearnerMealy<I, Integer>(
                     inputAlphabet, integerOracle, AcexAnalyzers.LINEAR_FWD);
-            learner = new GenericDecomposedLearner<I, O>(inputAlphabet, mCacheOracle, learnerSupplier, 2);
+            learner = new GenericDecomposedLearner<I, O>(inputAlphabet, mCacheOracle, learnerSupplier, components);
         } else if (algorithm.equals("TTT")) {
             learner = new TTTLearnerMealy<I, O>(inputAlphabet, mCacheOracle, AcexAnalyzers.LINEAR_FWD);
         } else {
@@ -223,9 +222,9 @@ public class Main {
         Stream<Path> paths = Files.walk(modelPath);
         for (Path path : paths.filter(Files::isRegularFile).toList()) {
             System.out.println(path.toString());
-            // if (!path.getFileName().toString().startsWith("random-2-5")) {
-            // continue;
-            // }
+            if (path.toString().compareTo("D:\\Code\\OLStar\\models\\random-2-30-4.dot") < 0) {
+                continue;
+            }
             CompactMealy<String, String> target = DOTParsers.mealy().readModel(path.toFile()).model;
             String decomposition = "decompositions\\" + path.getFileName().toString().replace(".dot", ".txt");
             Supplier<List<Map<String, Integer>>> outputMapSupplier = OutputMapSuppliers.from(decomposition);
